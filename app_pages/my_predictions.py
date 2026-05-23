@@ -6,31 +6,122 @@ import streamlit.components.v1 as components
 import pandas as pd
 from datetime import datetime
 
-# ── Background image ──────────────────────────────────────────────────────────
-_img_path = os.path.join(os.path.dirname(__file__), "..", "assets", "ioag9w7poe8ayrodgmlc.webp")
-if os.path.exists(_img_path):
-    _b64 = base64.b64encode(open(_img_path, "rb").read()).decode()
-    st.markdown(
-        f"""
-        <style>
-        [data-testid="stAppViewContainer"] {{
-            background-image: url("data:image/webp;base64,{_b64}");
-            background-size: cover;
-            background-position: center;
-            background-attachment: fixed;
-        }}
-        [data-testid="stAppViewContainer"]::before {{
-            content: "";
-            position: fixed;
-            inset: 0;
-            background: rgba(5, 10, 30, 0.72);
-            pointer-events: none;
-            z-index: 0;
-        }}
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
+from app_pages._momentum_slider import momentum_slider
+from app_pages._bracket_picker import bracket_picker
+
+# ── 90s arcade-scoreboard theme + ghostly Maradona behind the field ─────────
+_maradona_path = os.path.join(os.path.dirname(__file__), "..", "assets", "maradona.gif")
+_maradona_b64 = (
+    base64.b64encode(open(_maradona_path, "rb").read()).decode()
+    if os.path.exists(_maradona_path) else ""
+)
+
+# Background-only CSS — uses an f-string for the Maradona base64 payload.
+st.markdown(
+    f"""
+    <style>
+    [data-testid="stAppViewContainer"] {{
+        background-image: none !important;
+        background:
+            repeating-linear-gradient(
+                90deg,
+                rgba(40, 90, 50, 0.10) 0px,
+                rgba(40, 90, 50, 0.10) 80px,
+                rgba(20, 60, 35, 0.10) 80px,
+                rgba(20, 60, 35, 0.10) 160px
+            ),
+            radial-gradient(
+                ellipse at top,
+                #0d2418 0%,
+                #061308 65%,
+                #02080a 100%
+            ) !important;
+    }}
+    [data-testid="stAppViewContainer"]::before {{
+        content: "";
+        position: fixed;
+        inset: 0;
+        background-image: url("data:image/gif;base64,{_maradona_b64}");
+        background-size: cover;
+        background-position: center;
+        background-attachment: fixed;
+        opacity: 0.16;
+        filter: sepia(0.55) contrast(1.1) saturate(0.85);
+        mix-blend-mode: screen;
+        pointer-events: none;
+        z-index: 0;
+    }}
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+# Static theme CSS — plain string so single curly braces are safe.
+st.markdown(
+    """
+    <style>
+    @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&family=Bungee&display=swap');
+
+    /* Section headers in chunky display type — Italia '90 broadcast vibe */
+    [data-testid="stMainBlockContainer"] h1,
+    [data-testid="stMainBlockContainer"] h2,
+    [data-testid="stMainBlockContainer"] h3 {
+        font-family: 'Bungee', 'Impact', sans-serif !important;
+        letter-spacing: 1.5px;
+        text-transform: uppercase;
+        color: #f5e8c8 !important;
+        text-shadow: 3px 3px 0 #1a1408, 6px 6px 0 rgba(0,0,0,0.5);
+    }
+    [data-testid="stMainBlockContainer"] strong {
+        font-family: 'Bungee', 'Impact', sans-serif !important;
+        letter-spacing: 0.5px;
+        color: #ffd95c !important;
+    }
+    [data-testid="stCaptionContainer"], .stCaption {
+        font-family: 'VT323', 'Courier New', monospace !important;
+        font-size: 1.05rem !important;
+        color: #b8d4a8 !important;
+        letter-spacing: 0.5px;
+    }
+    [data-testid="stExpander"] {
+        border: 2px solid #f5c842 !important;
+        border-radius: 0 !important;
+        background: linear-gradient(180deg, #0e2814, #061308) !important;
+        box-shadow:
+            4px 4px 0 #1a1408,
+            inset 0 0 0 1px rgba(0,0,0,0.55) !important;
+        margin-bottom: 14px !important;
+    }
+    [data-testid="stExpander"] summary,
+    [data-testid="stExpander"] details > summary {
+        font-family: 'Bungee', 'Impact', sans-serif !important;
+        text-transform: uppercase;
+        letter-spacing: 1.2px;
+        color: #ffd95c !important;
+    }
+    [data-testid="stMainBlockContainer"] [kind="primary"],
+    [data-testid="stMainBlockContainer"] button[kind="primary"] {
+        font-family: 'Bungee', 'Impact', sans-serif !important;
+        font-size: 1.1rem !important;
+        letter-spacing: 2px;
+        text-transform: uppercase;
+        background: linear-gradient(180deg, #d83434 0%, #921818 100%) !important;
+        color: #fff5d0 !important;
+        border: 3px solid #ffd95c !important;
+        border-radius: 0 !important;
+        box-shadow:
+            5px 5px 0 #1a1408,
+            inset 0 2px 0 rgba(255,230,180,0.6) !important;
+        text-shadow: 2px 2px 0 #1a1408;
+    }
+    [data-testid="stMainBlockContainer"] [kind="primary"]:hover {
+        transform: translate(-2px, -2px);
+        box-shadow: 7px 7px 0 #1a1408, inset 0 2px 0 rgba(255,230,180,0.6) !important;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
 # ── Session + tables ──────────────────────────────────────────────────────────
 session = st.session_state.snowpark_session
@@ -139,16 +230,16 @@ components.html(
     <div style="background:rgba(0,0,0,0.55);border:1px solid rgba(255,255,255,0.15);
                 border-radius:10px;padding:12px 20px;text-align:center;
                 font-family:'Source Sans Pro',sans-serif;color:white;">
-      <div style="font-size:0.78rem;color:#aab4c8;letter-spacing:1px;
+      <div style="font-size:0.78rem;color:#d4b878;letter-spacing:1px;
                   text-transform:uppercase;margin-bottom:4px;">
         Veikkaukset lukittuvat
       </div>
       <div id="cd-timer"
-           style="font-size:1.6rem;font-weight:700;color:#4da6ff;
+           style="font-size:1.6rem;font-weight:700;color:#f5c842;
                   font-variant-numeric:tabular-nums;letter-spacing:2px;">
         Lasketaan...
       </div>
-      <div style="font-size:0.72rem;color:#8899aa;margin-top:2px;">
+      <div style="font-size:0.72rem;color:#aa9466;margin-top:2px;">
         11.6.2026 klo 19:00 (Helsinki)
       </div>
     </div>
@@ -240,42 +331,52 @@ st.caption(
 )
 
 dates = sorted(schedule_df["MATCH_DAY"].unique())
-all_inputs: dict[int, tuple] = {}
+all_match_ids: set[int] = set(schedule_df["ID"].astype(int).tolist())
 
-with st.form("prediction_form"):
-    for date in dates:
-        day_df = schedule_df[schedule_df["MATCH_DAY"] == date].copy()
-        day_ids = day_df["ID"].astype(int).tolist()
+st.caption(
+    "Vedä pokaalia oikealle (koti voittaa) tai vasemmalle (vieras voittaa). "
+    "Tallenna kaikki veikkaukset sivun lopussa olevalla painikkeella."
+)
 
-        day_complete = bool(existing_preds) and all(
-            existing_preds.get(gid, (None, None))[0] is not None for gid in day_ids
-        )
-        date_label = _fi_date(date)
-        label = (
-            f"{date_label} — {len(day_df)} ottelua  ✓"
-            if day_complete
-            else f"{date_label} — {len(day_df)} ottelua"
-        )
 
-        with st.expander(label, expanded=not day_complete):
-            hdr1, hdr2, hdr3 = st.columns([5, 1, 1])
-            hdr2.caption("Koti")
-            hdr3.caption("Vieras")
-            for _, row in day_df.iterrows():
-                gid = int(row["ID"])
-                ep = existing_preds.get(gid, (None, None))
-                h_def = str(int(ep[0])) if ep[0] is not None else ""
-                a_def = str(int(ep[1])) if ep[1] is not None else ""
-                c1, c2, c3 = st.columns([5, 1, 1])
-                c1.write(flagged(row["MATCH"]))
-                home_in = c2.text_input("H", value=h_def, key=f"h_{gid}",
-                                        label_visibility="collapsed")
-                away_in = c3.text_input("A", value=a_def, key=f"a_{gid}",
-                                        label_visibility="collapsed")
-                all_inputs[gid] = (home_in, away_in)
+@st.fragment
+def _render_match_slider(gid: int, match: str, default: tuple | None) -> None:
+    """Each match renders in its own fragment so dragging one slider only
+    reruns that single block instead of the whole page."""
+    home, _, away = match.partition(" vs ")
+    momentum_slider(
+        match_id=gid,
+        home_team=with_flag(home.strip()),
+        away_team=with_flag(away.strip()),
+        default_score=default,
+    )
 
-    submit_label = "Tallenna veikkaukset" if is_new else "Päivitä veikkaukset"
-    submit = st.form_submit_button(submit_label, type="primary")
+
+for date in dates:
+    day_df = schedule_df[schedule_df["MATCH_DAY"] == date].copy()
+    day_ids = day_df["ID"].astype(int).tolist()
+
+    day_complete = bool(existing_preds) and all(
+        existing_preds.get(gid, (None, None))[0] is not None for gid in day_ids
+    )
+    date_label = _fi_date(date)
+    label = (
+        f"{date_label} — {len(day_df)} ottelua  ✓"
+        if day_complete
+        else f"{date_label} — {len(day_df)} ottelua"
+    )
+
+    # Default collapsed when nothing's filled yet — avoids mounting all 48
+    # sliders on first page load. User expands a day to start picking.
+    with st.expander(label, expanded=day_complete is False and bool(existing_preds)):
+        for _, row in day_df.iterrows():
+            gid = int(row["ID"])
+            ep = existing_preds.get(gid, (None, None))
+            default = (int(ep[0]), int(ep[1])) if ep[0] is not None else None
+            _render_match_slider(gid, row["MATCH"], default)
+
+submit_label = "Tallenna veikkaukset" if is_new else "Päivitä veikkaukset"
+submit = st.button(submit_label, type="primary", use_container_width=True)
 
 # ── Handle group-stage submission ─────────────────────────────────────────────
 if submit:
@@ -283,21 +384,20 @@ if submit:
     parsed: dict[int, tuple] = {}
     skipped: list[str] = []
 
-    for gid, (h_str, a_str) in all_inputs.items():
-        h_s = h_str.strip() if h_str else ""
-        a_s = a_str.strip() if a_str else ""
-        if not h_s and not a_s:
+    # Read each match's score from the slider's session state. If untouched
+    # in this session, fall back to any previously saved prediction.
+    for gid in sorted(all_match_ids):
+        slider_state = st.session_state.get(f"mom_{gid}")
+        slider_score = getattr(slider_state, "score", None) if slider_state else None
+        if isinstance(slider_score, dict) and "home" in slider_score and "away" in slider_score:
+            parsed[gid] = (int(slider_score["home"]), int(slider_score["away"]))
+            continue
+        ep = existing_preds.get(gid, (None, None))
+        if ep[0] is not None:
+            parsed[gid] = (int(ep[0]), int(ep[1]))
+        else:
             parsed[gid] = (None, None)
             skipped.append(schedule_df[schedule_df["ID"] == gid].iloc[0]["MATCH"])
-        else:
-            try:
-                h, a = int(h_s), int(a_s)
-                if not (0 <= h <= 20 and 0 <= a <= 20):
-                    raise ValueError
-                parsed[gid] = (h, a)
-            except (ValueError, AttributeError):
-                parsed[gid] = (None, None)
-                skipped.append(schedule_df[schedule_df["ID"] == gid].iloc[0]["MATCH"])
 
     rows_out = []
     for gid, goals in parsed.items():
@@ -371,106 +471,121 @@ def _str_default(key: str) -> str:
     return v if isinstance(v, str) else ""
 
 
-with st.form("playoff_form"):
-    # ── Lohkovoittajat ja kakkoset (per group) ──────────────────────────
-    st.markdown("**Lohkovoittajat ja kakkoset**")
-    st.caption("Valitse kullekin lohkolle voittaja ja kakkonen (3 p + 3 p / lohko).")
+# ── Lohkovoittajat ja kakkoset (per group) ──────────────────────────────────
+st.markdown("**Lohkovoittajat ja kakkoset**")
+st.caption("Valitse kullekin lohkolle voittaja ja kakkonen (3 p + 3 p / lohko).")
 
-    group_picks: dict[str, tuple[str, str]] = {}
-    for letter in _GROUP_LETTERS:
-        teams = GROUPS[letter]
-        opts = ["—"] + teams
-        with st.expander(f"Lohko {letter}: {', '.join(teams)}", expanded=False):
-            c1, c2 = st.columns(2)
-            w_key = f"GROUP_{letter}_WINNER"
-            r_key = f"GROUP_{letter}_RUNNERUP"
-            w = c1.selectbox(
-                "Voittaja", options=opts,
-                index=_sel_default(w_key, opts),
-                key=f"sel_{w_key}",
-            )
-            r = c2.selectbox(
-                "Kakkonen", options=opts,
-                index=_sel_default(r_key, opts),
-                key=f"sel_{r_key}",
-            )
-            group_picks[letter] = (w, r)
+group_picks: dict[str, tuple[str, str]] = {}
+for letter in _GROUP_LETTERS:
+    teams = GROUPS[letter]
+    w_key = f"GROUP_{letter}_WINNER"
+    r_key = f"GROUP_{letter}_RUNNERUP"
+    w_skey = f"sel_{w_key}"
+    r_skey = f"sel_{r_key}"
 
-    # ── Parhaat kolmoset (8 best third-placed) ──────────────────────────
-    st.markdown("**Parhaat kolmoset – valitse 8 joukkuetta**")
-    st.caption("8 lohkokolmosta etenee R32-vaiheeseen (1 p / kpl).")
-    third_teams = st.multiselect(
-        "Parhaat kolmoset",
-        options=TEAMS, default=_ms_defaults("THIRD", 8),
-        max_selections=8, key="ms_third", label_visibility="collapsed",
+    with st.expander(f"Lohko {letter}: {', '.join(teams)}", expanded=False):
+        c1, c2 = st.columns(2)
+        w_opts = ["—"] + teams
+        w = c1.selectbox(
+            "Voittaja", options=w_opts,
+            index=_sel_default(w_key, w_opts),
+            key=w_skey,
+        )
+        # Runner-up cannot equal the winner. Prune a stale R value first so
+        # Streamlit doesn't raise on a now-invalid session_state entry.
+        r_opts = ["—"] + [t for t in teams if t != w]
+        if st.session_state.get(r_skey) not in r_opts:
+            st.session_state[r_skey] = "—"
+        r = c2.selectbox(
+            "Kakkonen", options=r_opts,
+            index=_sel_default(r_key, r_opts),
+            key=r_skey,
+        )
+        group_picks[letter] = (w, r)
+
+# ── Parhaat kolmoset (8 best third-placed) ──────────────────────────────────
+st.markdown("**Parhaat kolmoset – valitse 8 joukkuetta**")
+st.caption("8 lohkokolmosta etenee R32-vaiheeseen (1 p / kpl).")
+
+# Best-third candidates exclude any team already picked as a group winner
+# or runner-up — a team can only qualify in one slot.
+_picked_w_r = {
+    t for (w, r) in group_picks.values() for t in (w, r) if t and t != "—"
+}
+_third_options = [t for t in TEAMS if t not in _picked_w_r]
+if "ms_third" in st.session_state:
+    st.session_state["ms_third"] = [
+        t for t in st.session_state["ms_third"] if t in _third_options
+    ]
+_third_default = [t for t in _ms_defaults("THIRD", 8) if t in _third_options]
+
+third_teams = st.multiselect(
+    "Parhaat kolmoset",
+    options=_third_options, default=_third_default,
+    max_selections=8, key="ms_third", label_visibility="collapsed",
+)
+
+# ── R32 → Champion: visual bracket ──────────────────────────────────────────
+st.markdown("**Bracket: R16 → Mestari**")
+st.caption(
+    "Klikkaa joukkuetta nostaaksesi sen seuraavaan vaiheeseen. "
+    "Klikkaa uudelleen pudottaaksesi sen pois jatkosta."
+)
+
+# Build the R32 pool from current group + best-thirds picks. Order preserved
+# to keep the bracket's chip order stable across reruns.
+_r32_pool: list[str] = []
+_seen: set[str] = set()
+for letter in _GROUP_LETTERS:
+    w, r = group_picks[letter]
+    for team in (w, r):
+        if team and team != "—" and team not in _seen:
+            _r32_pool.append(team)
+            _seen.add(team)
+for team in third_teams:
+    if team and team not in _seen:
+        _r32_pool.append(team)
+        _seen.add(team)
+
+if len(_r32_pool) >= 16:
+    bracket_picks = bracket_picker(
+        teams_r32=_r32_pool,
+        initial_picks={
+            "r16": _ms_defaults("R16", 16),
+            "qf": _ms_defaults("QF", 8),
+            "sf": _ms_defaults("SF", 4),
+            "finalists": _ms_defaults("FINALIST", 2),
+            "champion": _str_default("CHAMPION") or None,
+        },
+        key="bracket_picker",
     )
-
-    # ── R16-jatkajat (16 teams advancing from R32) ──────────────────────
-    st.markdown("**R16-jatkajat – valitse 16 joukkuetta**")
-    st.caption("R32-vaiheen voittajat etenevät kuudentoista joukkoon (2 p / kpl).")
-    r16_teams = st.multiselect(
-        "R16-jatkajat",
-        options=TEAMS, default=_ms_defaults("R16", 16),
-        max_selections=16, key="ms_r16", label_visibility="collapsed",
+else:
+    st.info(
+        f"Valitse ensin lohkovoittajat, kakkoset ja parhaat kolmoset – bracket aukeaa, "
+        f"kun valittuna on vähintään 16 joukkuetta (nyt {len(_r32_pool)})."
     )
+    bracket_picks = {"r16": [], "qf": [], "sf": [], "finalists": [], "champion": None}
 
-    # ── Puolivälierät ───────────────────────────────────────────────────
-    st.markdown("**Puolivälierät – valitse 8 joukkuetta**")
-    st.caption("R16-voittajat puolivälieriin (3 p / kpl).")
-    qf_teams = st.multiselect(
-        "Puolivälieräjoukkueet",
-        options=TEAMS, default=_ms_defaults("QF", 8),
-        max_selections=8, key="ms_qf", label_visibility="collapsed",
-    )
+# ── Erikoisveikkaukset ──────────────────────────────────────────────────────
+st.markdown("**Erikoisveikkaukset**")
+col_e1, col_e2 = st.columns(2)
+top_scorer = col_e1.text_input(
+    "Maalikuningas (pelaajan nimi)",
+    value=_str_default("TOP_SCORER"),
+    key="ti_scorer",
+    help="15 p oikeasta turnauksen maalikuninkaasta.",
+)
+dark_opts = ["—"] + TEAMS
+dark_horse = col_e2.selectbox(
+    "Musta hevonen (etenee puolivälieriin)",
+    options=dark_opts,
+    index=_sel_default("DARK_HORSE", dark_opts),
+    key="sel_darkhorse",
+    help="15 p jos valitsemasi joukkue selviää puolivälieriin asti.",
+)
 
-    # ── Välierät ────────────────────────────────────────────────────────
-    st.markdown("**Välierät – valitse 4 joukkuetta**")
-    st.caption("Puolivälierien voittajat välieriin (5 p / kpl).")
-    sf_teams = st.multiselect(
-        "Välieräjoukkueet",
-        options=TEAMS, default=_ms_defaults("SF", 4),
-        max_selections=4, key="ms_sf", label_visibility="collapsed",
-    )
-
-    # ── Finalistit ──────────────────────────────────────────────────────
-    st.markdown("**Finalistit – valitse 2 joukkuetta**")
-    st.caption("+10 p / kpl välieräpaikan päälle.")
-    f_teams = st.multiselect(
-        "Finalistit",
-        options=TEAMS, default=_ms_defaults("FINALIST", 2),
-        max_selections=2, key="ms_f", label_visibility="collapsed",
-    )
-
-    # ── Mestari ─────────────────────────────────────────────────────────
-    st.markdown("**Mestari**")
-    st.caption("+20 p finalistipisteen päälle.")
-    champ_opts = ["—"] + TEAMS
-    champion = st.selectbox(
-        "Mestari", options=champ_opts,
-        index=_sel_default("CHAMPION", champ_opts),
-        key="sel_champion", label_visibility="collapsed",
-    )
-
-    # ── Erikoisveikkaukset ──────────────────────────────────────────────
-    st.markdown("**Erikoisveikkaukset**")
-    col_e1, col_e2 = st.columns(2)
-    top_scorer = col_e1.text_input(
-        "Maalikuningas (pelaajan nimi)",
-        value=_str_default("TOP_SCORER"),
-        key="ti_scorer",
-        help="15 p oikeasta turnauksen maalikuninkaasta.",
-    )
-    dark_opts = ["—"] + TEAMS
-    dark_horse = col_e2.selectbox(
-        "Musta hevonen (etenee puolivälieriin)",
-        options=dark_opts,
-        index=_sel_default("DARK_HORSE", dark_opts),
-        key="sel_darkhorse",
-        help="15 p jos valitsemasi joukkue selviää puolivälieriin asti.",
-    )
-
-    _po_label = "Tallenna pudotuspeliveikkaukset" if playoff_new else "Päivitä pudotuspeliveikkaukset"
-    playoff_submit = st.form_submit_button(_po_label, type="primary")
+_po_label = "Tallenna pudotuspeliveikkaukset" if playoff_new else "Päivitä pudotuspeliveikkaukset"
+playoff_submit = st.button(_po_label, type="primary", use_container_width=True, key="btn_po_submit")
 
 # ── Handle playoff submission ─────────────────────────────────────────────────
 if playoff_submit:
@@ -481,11 +596,12 @@ if playoff_submit:
             return "NULL"
         return "'" + str(v).replace("'", "''") + "'"
 
-    third_v = (list(third_teams) + [None] * 8)[:8]
-    r16_v   = (list(r16_teams)   + [None] * 16)[:16]
-    qf_v    = (list(qf_teams)    + [None] * 8)[:8]
-    sf_v    = (list(sf_teams)    + [None] * 4)[:4]
-    fi_v    = (list(f_teams)     + [None] * 2)[:2]
+    third_v = (list(third_teams)             + [None] * 8)[:8]
+    r16_v   = (list(bracket_picks["r16"])    + [None] * 16)[:16]
+    qf_v    = (list(bracket_picks["qf"])     + [None] * 8)[:8]
+    sf_v    = (list(bracket_picks["sf"])     + [None] * 4)[:4]
+    fi_v    = (list(bracket_picks["finalists"]) + [None] * 2)[:2]
+    champion = bracket_picks["champion"]
 
     values: list[str] = [f"'{user_email}'"]
     for letter in _GROUP_LETTERS:

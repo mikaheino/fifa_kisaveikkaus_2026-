@@ -4,14 +4,14 @@ import streamlit as st
 import pandas as pd
 
 # ── Background image ──────────────────────────────────────────────────────────
-_img_path = os.path.join(os.path.dirname(__file__), "..", "assets", "ioag9w7poe8ayrodgmlc.webp")
+_img_path = os.path.join(os.path.dirname(__file__), "..", "assets", "maradona.gif")
 if os.path.exists(_img_path):
     _b64 = base64.b64encode(open(_img_path, "rb").read()).decode()
     st.markdown(
         f"""
         <style>
         [data-testid="stAppViewContainer"] {{
-            background-image: url("data:image/webp;base64,{_b64}");
+            background-image: url("data:image/gif;base64,{_b64}");
             background-size: cover;
             background-position: center;
             background-attachment: fixed;
@@ -20,7 +20,7 @@ if os.path.exists(_img_path):
             content: "";
             position: fixed;
             inset: 0;
-            background: rgba(5, 10, 30, 0.72);
+            background: rgba(20, 14, 8, 0.72);
             pointer-events: none;
             z-index: 0;
         }}

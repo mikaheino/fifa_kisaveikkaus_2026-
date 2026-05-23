@@ -14,7 +14,7 @@ st.set_page_config(
     layout="centered",
 )
 
-_ioag_b64 = _img_b64("assets/ioag9w7poe8ayrodgmlc.webp")
+_ioag_b64 = _img_b64("assets/maradona.gif")
 st.markdown(
     f"""
     <style>
@@ -27,29 +27,29 @@ st.markdown(
     }}
 
     .stApp {{
-        background-image: url("data:image/webp;base64,{_ioag_b64}");
+        background-image: url("data:image/gif;base64,{_ioag_b64}");
         background-size: cover;
         background-position: center top;
         background-attachment: fixed;
-        color: #dce8f5;
+        color: #f5e8c8;
     }}
     .stApp::before {{
         content: "";
         position: fixed;
         inset: 0;
-        background: rgba(5, 10, 30, 0.68);
+        background: rgba(20, 14, 8, 0.68);
         pointer-events: none;
         z-index: 0;
     }}
 
     .stApp h1, .stApp h2, .stApp h3, .stApp h4,
     .stApp p, .stApp span, .stApp label, .stApp div,
-    .stApp .stMarkdown, .stApp .stText {{ color: #dce8f5 !important; }}
+    .stApp .stMarkdown, .stApp .stText {{ color: #f5e8c8 !important; }}
 
-    [data-testid="stSidebar"] {{ color: #dce8f5 !important; }}
+    [data-testid="stSidebar"] {{ color: #f5e8c8 !important; }}
     [data-testid="stSidebar"] span,
     [data-testid="stSidebar"] p,
-    [data-testid="stSidebar"] label {{ color: #dce8f5 !important; }}
+    [data-testid="stSidebar"] label {{ color: #f5e8c8 !important; }}
 
     [data-testid="stForm"] {{ border: 0px; }}
 
@@ -57,121 +57,121 @@ st.markdown(
     [data-testid="stNumberInput"] input,
     [data-testid="stTextInput"] > div,
     [data-testid="stNumberInput"] > div > div {{
-        background-color: rgba(195, 215, 250, 0.94) !important;
-        color: #07111f !important;
+        background-color: rgba(245, 220, 150, 0.94) !important;
+        color: #1a1408 !important;
         border: none !important;
         border-radius: 0 !important;
         box-shadow:
             inset 1px 1px rgba(0, 0, 0, 0.85),
-            inset -1px -1px rgba(220, 235, 255, 0.55) !important;
+            inset -1px -1px rgba(250, 230, 180, 0.55) !important;
     }}
     [data-testid="stTextInput"] input,
     [data-testid="stNumberInput"] input {{
         min-height: 38px !important;
         padding: 6px 10px !important;
     }}
-    [data-testid="stTextInput"] input::placeholder {{ color: #4a6a8a !important; }}
+    [data-testid="stTextInput"] input::placeholder {{ color: #8a6a3a !important; }}
 
     [data-testid="stSelectbox"] [data-baseweb="select"] > div {{
-        background-color: rgba(195, 215, 250, 0.94) !important;
+        background-color: rgba(245, 220, 150, 0.94) !important;
         border: none !important;
         border-radius: 0 !important;
         min-height: 38px !important;
         box-shadow:
             inset 1px 1px rgba(0, 0, 0, 0.85),
-            inset -1px -1px rgba(220, 235, 255, 0.55) !important;
+            inset -1px -1px rgba(250, 230, 180, 0.55) !important;
     }}
 
     [data-testid="stMultiSelect"] [data-baseweb="select"] > div,
     [data-testid="stMultiSelect"] > div > div {{
-        background-color: rgba(195, 215, 250, 0.94) !important;
+        background-color: rgba(245, 220, 150, 0.94) !important;
         border: none !important;
         border-radius: 0 !important;
         box-shadow:
             inset 1px 1px rgba(0, 0, 0, 0.85),
-            inset -1px -1px rgba(220, 235, 255, 0.55) !important;
+            inset -1px -1px rgba(250, 230, 180, 0.55) !important;
     }}
-    [data-testid="stMultiSelect"] [data-baseweb="select"] * {{ color: #07111f !important; }}
+    [data-testid="stMultiSelect"] [data-baseweb="select"] * {{ color: #1a1408 !important; }}
     [data-testid="stMultiSelect"] [data-baseweb="tag"] {{
-        background-color: rgba(30, 80, 180, 0.80) !important;
+        background-color: rgba(170, 120, 30, 0.85) !important;
         border-radius: 0 !important;
         border: none !important;
         box-shadow: none !important;
     }}
     [data-testid="stMultiSelect"] [data-baseweb="tag"] span,
-    [data-testid="stMultiSelect"] [data-baseweb="tag"] button {{ color: #dce8f5 !important; }}
+    [data-testid="stMultiSelect"] [data-baseweb="tag"] button {{ color: #f5e8c8 !important; }}
     [data-testid="stSelectbox"] [data-baseweb="select"] *,
-    [data-testid="stSelectbox"] [data-baseweb="select"] input {{ color: #07111f !important; }}
-    [data-testid="stSelectbox"] [data-baseweb="select"] svg {{ fill: #07111f !important; }}
+    [data-testid="stSelectbox"] [data-baseweb="select"] input {{ color: #1a1408 !important; }}
+    [data-testid="stSelectbox"] [data-baseweb="select"] svg {{ fill: #1a1408 !important; }}
 
-    [data-baseweb="popover"] > div {{ background-color: #0d1e3f !important; }}
-    [data-baseweb="menu"] li {{ background-color: #0d1e3f !important; color: #dce8f5 !important; }}
+    [data-baseweb="popover"] > div {{ background-color: #1f1a0a !important; }}
+    [data-baseweb="menu"] li {{ background-color: #1f1a0a !important; color: #f5e8c8 !important; }}
     [data-baseweb="menu"] li:hover,
-    [data-baseweb="menu"] [aria-selected="true"] {{ background-color: #1a3a70 !important; }}
+    [data-baseweb="menu"] [aria-selected="true"] {{ background-color: #3d3014 !important; }}
 
     [data-testid="stExpander"] {{
         border: none !important;
         border-radius: 0 !important;
-        background-color: rgba(10, 22, 55, 0.80) !important;
+        background-color: rgba(40, 28, 10, 0.85) !important;
         box-shadow:
             inset -1px -1px rgba(0, 0, 0, 0.85),
-            inset 1px 1px rgba(160, 195, 255, 0.50),
-            inset -2px -2px rgba(0, 0, 20, 0.55),
-            inset 2px 2px rgba(130, 170, 255, 0.22) !important;
+            inset 1px 1px rgba(210, 175, 90, 0.50),
+            inset -2px -2px rgba(20, 12, 4, 0.65),
+            inset 2px 2px rgba(180, 140, 60, 0.22) !important;
     }}
     [data-testid="stExpander"] summary {{
-        background-color: rgba(20, 50, 115, 0.75) !important;
+        background-color: rgba(80, 55, 15, 0.85) !important;
         border-radius: 0 !important;
         box-shadow:
             inset -1px -1px rgba(0, 0, 0, 0.70),
-            inset 1px 1px rgba(160, 200, 255, 0.55) !important;
+            inset 1px 1px rgba(210, 175, 90, 0.55) !important;
         padding: 4px 8px !important;
     }}
     [data-testid="stExpander"] summary *,
     [data-testid="stExpander"] summary p,
-    [data-testid="stExpander"] summary span {{ color: #dce8f5 !important; }}
+    [data-testid="stExpander"] summary span {{ color: #f5e8c8 !important; }}
 
     header[data-testid="stHeader"] {{
-        background-color: rgba(8, 16, 31, 0.97) !important;
-        border-bottom: 2px solid rgba(70, 120, 200, 0.40) !important;
+        background-color: rgba(20, 14, 8, 0.97) !important;
+        border-bottom: 2px solid rgba(150, 110, 30, 0.55) !important;
     }}
     header[data-testid="stHeader"] a,
     header[data-testid="stHeader"] span,
     header[data-testid="stHeader"] p,
     header[data-testid="stHeader"] button,
-    header[data-testid="stHeader"] div {{ color: #dce8f5 !important; }}
+    header[data-testid="stHeader"] div {{ color: #f5e8c8 !important; }}
     header[data-testid="stHeader"] [aria-selected="true"],
     header[data-testid="stHeader"] [data-active="true"] {{
-        border-bottom: 2px solid #4a90d9 !important;
-        color: #4a90d9 !important;
+        border-bottom: 2px solid #d4a017 !important;
+        color: #d4a017 !important;
     }}
 
     .stButton > button,
     [data-testid="stFormSubmitButton"] > button,
     [data-testid="stBaseButton-primary"],
     [data-testid="stBaseButton-secondary"] {{
-        background-color: rgba(18, 45, 105, 0.85) !important;
-        color: #dce8f5 !important;
+        background-color: rgba(140, 100, 25, 0.85) !important;
+        color: #f5e8c8 !important;
         border: none !important;
         border-radius: 0 !important;
         box-shadow:
             inset -1px -1px rgba(0, 0, 0, 0.90),
-            inset 1px 1px rgba(170, 200, 255, 0.70),
-            inset -2px -2px rgba(0, 0, 20, 0.55),
-            inset 2px 2px rgba(140, 175, 255, 0.28) !important;
+            inset 1px 1px rgba(220, 180, 90, 0.70),
+            inset -2px -2px rgba(20, 12, 4, 0.65),
+            inset 2px 2px rgba(190, 155, 70, 0.28) !important;
     }}
     .stButton > button:hover,
     [data-testid="stFormSubmitButton"] > button:hover {{
-        background-color: rgba(25, 60, 145, 0.92) !important;
-        color: #7ec8ff !important;
+        background-color: rgba(190, 140, 35, 0.92) !important;
+        color: #f5c842 !important;
     }}
     .stButton > button:active,
     [data-testid="stFormSubmitButton"] > button:active {{
         box-shadow:
-            inset -1px -1px rgba(170, 200, 255, 0.70),
+            inset -1px -1px rgba(220, 180, 90, 0.70),
             inset 1px 1px rgba(0, 0, 0, 0.90),
-            inset -2px -2px rgba(140, 175, 255, 0.28),
-            inset 2px 2px rgba(0, 0, 20, 0.55) !important;
+            inset -2px -2px rgba(190, 155, 70, 0.28),
+            inset 2px 2px rgba(20, 12, 4, 0.65) !important;
     }}
 
     div[role="radiogroup"] {{ gap: 0.5rem; }}
@@ -180,21 +180,21 @@ st.markdown(
         border: none !important;
         border-radius: 0 !important;
         cursor: pointer;
-        background: rgba(18, 45, 105, 0.75) !important;
+        background: rgba(140, 100, 25, 0.75) !important;
         box-shadow:
             inset -1px -1px rgba(0, 0, 0, 0.90),
-            inset 1px 1px rgba(170, 200, 255, 0.70),
-            inset -2px -2px rgba(0, 0, 20, 0.55),
-            inset 2px 2px rgba(140, 175, 255, 0.28) !important;
+            inset 1px 1px rgba(220, 180, 90, 0.70),
+            inset -2px -2px rgba(20, 12, 4, 0.65),
+            inset 2px 2px rgba(190, 155, 70, 0.28) !important;
     }}
     div[role="radiogroup"] label:has(input:checked) {{
-        background: rgba(30, 70, 165, 0.92) !important;
-        color: #7ec8ff !important;
+        background: rgba(160, 110, 30, 0.92) !important;
+        color: #f5c842 !important;
         box-shadow:
-            inset -1px -1px rgba(170, 200, 255, 0.70),
+            inset -1px -1px rgba(220, 180, 90, 0.70),
             inset 1px 1px rgba(0, 0, 0, 0.90),
-            inset -2px -2px rgba(140, 175, 255, 0.28),
-            inset 2px 2px rgba(0, 0, 20, 0.55) !important;
+            inset -2px -2px rgba(190, 155, 70, 0.28),
+            inset 2px 2px rgba(20, 12, 4, 0.65) !important;
     }}
     </style>
     """,
@@ -211,7 +211,13 @@ if "user_email" not in st.session_state:
     from mock_session import MOCK_CURRENT_USER
     st.session_state.user_email = MOCK_CURRENT_USER
 
-st.image("assets/logo_2026.png", width="stretch")
+_logo_b64 = base64.b64encode(open("assets/logo_2026.png", "rb").read()).decode()
+st.markdown(
+    f'<img src="data:image/png;base64,{_logo_b64}" '
+    f'style="width:100%;opacity:0.45;display:block;margin-bottom:0.5rem;" '
+    f'alt="FIFA 2026 -veikkaus" />',
+    unsafe_allow_html=True,
+)
 
 pages = st.navigation(
     [

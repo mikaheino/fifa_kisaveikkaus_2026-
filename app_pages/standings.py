@@ -61,14 +61,14 @@ def email_to_display_name(email: str) -> str:
 
 
 # ── Background image ──────────────────────────────────────────────────────────
-_img_path = os.path.join(os.path.dirname(__file__), "..", "assets", "saku-koivu.jpg")
+_img_path = os.path.join(os.path.dirname(__file__), "..", "assets", "maradona.gif")
 if os.path.exists(_img_path):
     _b64 = base64.b64encode(open(_img_path, "rb").read()).decode()
     st.markdown(
         f"""
         <style>
         [data-testid="stAppViewContainer"] {{
-            background-image: url("data:image/jpeg;base64,{_b64}");
+            background-image: url("data:image/gif;base64,{_b64}");
             background-size: cover;
             background-position: center;
             background-attachment: fixed;
@@ -77,7 +77,7 @@ if os.path.exists(_img_path):
             content: "";
             position: fixed;
             inset: 0;
-            background: rgba(5, 10, 30, 0.72);
+            background: rgba(20, 14, 8, 0.72);
             pointer-events: none;
             z-index: 0;
         }}
@@ -257,12 +257,12 @@ if leaderboard_rows:
     rank_html_parts = []
     for i, row in enumerate(leaderboard_rows, start=1):
         is_me = row["email"] == current_user
-        bg = "rgba(30, 70, 165, 0.92)" if is_me else "rgba(20, 50, 115, 0.75)"
-        marker = " <span style='color:#7ec8ff;font-size:0.78rem;'>(sinä)</span>" if is_me else ""
+        bg = "rgba(160, 110, 30, 0.92)" if is_me else "rgba(80, 55, 15, 0.85)"
+        marker = " <span style='color:#f5c842;font-size:0.78rem;'>(sinä)</span>" if is_me else ""
         breakdown = ""
         if row["bracket_pts"]:
             breakdown = (
-                f"<span style='color:#aab4c8;font-size:0.75rem;margin-right:0.6rem;'>"
+                f"<span style='color:#d4b878;font-size:0.75rem;margin-right:0.6rem;'>"
                 f"alkulohko {row['group_pts']} + bracket {row['bracket_pts']}</span>"
             )
         rank_html_parts.append(
@@ -270,8 +270,8 @@ if leaderboard_rows:
             f"padding:8px 14px;margin-bottom:4px;background:{bg};"
             f"box-shadow:inset -1px -1px rgba(0,0,0,0.85),inset 1px 1px rgba(170,200,255,0.55),"
             f"inset -2px -2px rgba(0,0,20,0.55),inset 2px 2px rgba(140,175,255,0.28);"
-            f"color:#dce8f5;font-family:'Roboto',Arial,sans-serif;\">"
-            f"<span><span style='display:inline-block;width:2.2rem;color:#7ec8ff;font-weight:700;'>"
+            f"color:#f5e8c8;font-family:'Roboto',Arial,sans-serif;\">"
+            f"<span><span style='display:inline-block;width:2.2rem;color:#f5c842;font-weight:700;'>"
             f"{i}.</span>{row['name']}{marker}</span>"
             f"<span>{breakdown}"
             f"<span style='font-weight:700;font-variant-numeric:tabular-nums;'>{row['points']} p</span>"
@@ -353,17 +353,17 @@ if selected_display:
 
                     pts = row["POINTS"]
                     if pd.isna(pts):
-                        badge = "<span style='color:#8899aa;'>—</span>"
+                        badge = "<span style='color:#aa9466;'>—</span>"
                     else:
                         pts_int = int(pts)
                         if pts_int == 5:
-                            bg = "rgba(40,160,80,0.85)"; fg = "#dce8f5"
+                            bg = "rgba(40,160,80,0.85)"; fg = "#f5e8c8"
                         elif pts_int == 3:
-                            bg = "rgba(80,140,200,0.85)"; fg = "#dce8f5"
+                            bg = "rgba(80,140,200,0.85)"; fg = "#f5e8c8"
                         elif pts_int == 1:
-                            bg = "rgba(200,160,40,0.85)"; fg = "#07111f"
+                            bg = "rgba(200,160,40,0.85)"; fg = "#1a1408"
                         else:
-                            bg = "rgba(120,40,40,0.75)"; fg = "#dce8f5"
+                            bg = "rgba(120,40,40,0.75)"; fg = "#f5e8c8"
                         badge = (
                             f"<span style='background:{bg};color:{fg};"
                             f"padding:2px 8px;font-weight:700;'>{pts_int}</span>"
