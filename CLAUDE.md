@@ -2,6 +2,13 @@
 
 Full project documentation is in **AGENTS.md**. Read that file for file structure, Snowflake schema, deploy steps, key patterns, and compatibility rules.
 
+## Streamlit-in-Snowflake template repos
+
+This repo is the **container runtime** template. For new SiS projects, start from whichever runtime fits:
+
+- **Container runtime** (this repo, preferred default): https://github.com/mikaheino/fifa_kisaveikkaus_2026 — CCv2 components, `pyproject.toml`, compute pool + EAI.
+- **Warehouse runtime** (legacy, simpler infra): https://github.com/mikaheino/mm_kisaveikkaus — `environment.yml`, `get_active_session()`, no compute pool. CCv2 components are stripped here.
+
 ## Essential rules for Claude Code
 
 - **Runtime**: Snowflake SiS **container runtime** on `FIFA_VEIKKAUS_POOL` (XS, auto-suspended by `FIFA_VEIKKAUS_AUTOSTOP_TASK`), Python 3.11. Anaconda channel preferred; pip allowed.

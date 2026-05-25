@@ -87,6 +87,15 @@ https://docs.snowflake.com/en/developer-guide/streamlit/app-development/dependen
 
 This project serves as the **template** for creating Streamlit-in-Snowflake apps on the container runtime. The following sections document the critical differences from warehouse runtime and the gotchas encountered during migration.
 
+### Template repositories
+
+When starting a new Streamlit-in-Snowflake project, clone whichever of these matches the runtime you need — they are the canonical, working references:
+
+| Runtime | Template repository | Use when |
+|---|---|---|
+| **Container runtime** | https://github.com/mikaheino/fifa_kisaveikkaus_2026 | You need CCv2 custom components, full pip/PyPI dependency control, or thread-safe shared caching. This is the preferred default for new projects. |
+| **Warehouse runtime** | https://github.com/mikaheino/mm_kisaveikkaus | You need the legacy warehouse runtime — simpler infra (no compute pool, no EAI), conda-based deps via `environment.yml`, per-viewer instance model. Note: CCv2 components are stripped here. |
+
 ### Required infrastructure (Snowflake objects)
 
 | Object | Purpose |
