@@ -146,15 +146,16 @@ _JS = r"""
 export default function (component) {
   const { data, parentElement, setStateValue } = component;
 
-  // 21 stops: away by 10 → draw (1-1) → home by 10.
+  // 21 stops: home by 10 (trophy left) → draw → away by 10 (trophy right).
+  // Trophy slides toward the team that's scoring.
   const MAX_DIFF = 10;
   const N = 2 * MAX_DIFF + 1;
   const DRAW_IDX = MAX_DIFF;
   const POSITIONS = Array.from({ length: N }, (_, i) => {
     const diff = i - MAX_DIFF;
     if (diff === 0) return { home: 0, away: 0 };
-    if (diff > 0) return { home: diff, away: 0 };
-    return { home: 0, away: -diff };
+    if (diff > 0) return { home: 0, away: diff };
+    return { home: -diff, away: 0 };
   });
 
   // First-mount setup: populate team names and tick marks.
@@ -176,7 +177,7 @@ export default function (component) {
 
   function scoreToIdx(s) {
     if (!s || s.home == null || s.away == null) return null;
-    const diff = s.home - s.away;
+    const diff = s.away - s.home;
     if (diff === 0) return DRAW_IDX;
     return Math.max(0, Math.min(N - 1, DRAW_IDX + diff));
   }
@@ -281,11 +282,20 @@ def momentum_slider(
 ) -> tuple[int, int] | None:
     """Render one match-prediction trophy slider. Returns the picked score or None."""
     key = f"mom_{match_id}"
-    score_payload = (
-        {"home": int(default_score[0]), "away": int(default_score[1])}
-        if default_score is not None
-        else None
-    )
+    # On reruns the user's most recent pick lives in session_state[key].score —
+    # that's the source of truth and must be fed back as `data` so the slider
+    # doesn't visually snap back to the original DB default after a rerun.
+    prior = st.session_state.get(key)
+    prior_score = getattr(prior, "score", None) if prior is not None else None
+    if isinstance(prior_score, dict) and "home" in prior_score and "away" in prior_score:
+        score_payload = {
+            "home": int(prior_score["home"]),
+            "away": int(prior_score["away"]),
+        }
+    elif default_score is not None:
+        score_payload = {"home": int(default_score[0]), "away": int(default_score[1])}
+    else:
+        score_payload = None
     result = _MOM_COMPONENT(
         key=key,
         data={

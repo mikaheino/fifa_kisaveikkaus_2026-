@@ -1,6 +1,6 @@
 # FIFA-veikkaus 2026
 
-Internal football prediction pool for the **2026 FIFA World Cup** (USA / Canada / Mexico, June 11 – July 19, 2026). Runs as a Streamlit-in-Snowflake app.
+Internal football prediction pool for the **2026 FIFA World Cup** (USA / Canada / Mexico, June 11 – July 19, 2026). Runs as a Streamlit-in-Snowflake **container-runtime** app on the `FIFA_VEIKKAUS_POOL` compute pool, auto-suspended by `FIFA_VEIKKAUS_AUTOSTOP_TASK` after 60 minutes of viewer idle (~60-90s cold start on next visit).
 
 - **Veikkausaika lukittuu:** 11.6.2026 klo 19:00 (Helsinki) – juuri ennen avausottelua.
 - **Ennustettavaa:** 72 alkulohko-ottelua + koko pudotuspelibracket + maalikuningas + oma musta hevonen.
@@ -35,7 +35,7 @@ mock_session.py             # In-memory Snowpark mock
 app_pages/                  # my_predictions, standings, rules, admin_results
 tests/                      # pytest (pure Python)
 assets/                     # logo + background images
-environment.yml             # Snowflake warehouse runtime deps
+environment.yml             # SiS dependency manifest (Anaconda channel; pip allowed on container runtime)
 pyproject.toml              # Local dev deps (uv)
 AGENTS.md                   # Full project docs
 CLAUDE.md                   # Brief Claude Code instructions

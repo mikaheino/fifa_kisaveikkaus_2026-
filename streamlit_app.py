@@ -201,16 +201,22 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# -- Snowflake session (get_active_session works in both classic SiS and vNext) --
-from snowflake.snowpark.context import get_active_session
-st.session_state.snowpark_session = get_active_session()
+# -- Snowflake session (container runtime requires st.connection, not get_active_session) --
+st.session_state.snowpark_session = st.connection("snowflake").session()
 
 # -- Resolve the viewer's identity --
-# In vNext SiS get_active_session() is scoped to the viewer, so CURRENT_USER()
-# returns their Snowflake username, which equals their email address at Recordly.
-st.session_state.user_email = st.session_state.snowpark_session.sql(
-    "SELECT CURRENT_USER()"
-).collect()[0][0].lower()
+# st.user.email returns the viewer's email in both warehouse and container runtimes.
+st.session_state.user_email = st.user.email.lower()
+
+# Activity ping for the auto-suspend Task in db/setup.sql section 7c:
+# the Task suspends FIFA_VEIKKAUS_POOL after 60 min without rows here.
+try:
+    st.session_state.snowpark_session.sql(
+        "INSERT INTO FIFA_VEIKKAUS_ACTIVITY (TS, USER_EMAIL) "
+        f"VALUES (CURRENT_TIMESTAMP(), '{st.session_state.user_email}')"
+    ).collect()
+except Exception:
+    pass
 
 # -- Display logo (rendered as <img> so we can apply opacity) --
 import base64

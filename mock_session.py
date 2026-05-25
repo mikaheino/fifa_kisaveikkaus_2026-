@@ -1,73 +1,33 @@
 """
 Mock Snowpark session for local development without a Snowflake connection.
-Provides sample schedule data, fake results for the opening days, and
-in-memory predictions in a single shared table so all UI features can be tested.
+Schedule + groups load from ``schedule_data`` (single source of truth backed
+by ``data/schedule_2026.json``); this module adds in-memory predictions and
+results storage on top so all UI features can be exercised locally.
 """
 import pandas as pd
-from datetime import date, timedelta
-from itertools import combinations
 from typing import Optional
 
-# ── Sample groups (placeholder — admin replaces with actual draw via SQL) ─────
-#
-# 48 teams across 12 groups of 4. Hosts pre-allocated:
-#   Mexico → A, Canada → B, USA → D.
-# Remaining teams distributed as a plausible spread of qualified nations from
-# the 2026 cycle. Replace with the real draw output in production.
-
-GROUPS: dict[str, list[str]] = {
-    "A": ["Meksiko",     "Argentiina",  "Marokko",          "Australia"],
-    "B": ["Kanada",      "Espanja",     "Senegal",          "Japani"],
-    "C": ["Brasilia",    "Englanti",    "Kolumbia",         "Uzbekistan"],
-    "D": ["Yhdysvallat", "Ranska",      "Egypti",           "Iran"],
-    "E": ["Saksa",       "Norja",       "Tunisia",          "Etelä-Korea"],
-    "F": ["Portugali",   "Sveitsi",     "Algeria",          "Qatar"],
-    "G": ["Alankomaat",  "Belgia",      "Norsunluurannikko","Bolivia"],
-    "H": ["Kroatia",     "Itävalta",    "Ghana",            "Saudi-Arabia"],
-    "I": ["Skotlanti",   "Ruotsi",      "Etelä-Afrikka",    "Jordania"],
-    "J": ["Turkki",      "Tšekki",      "Kongon DT",        "Panama"],
-    "K": ["Bosnia",      "Uruguay",     "Kap Verde",        "Paraguay"],
-    "L": ["Ecuador",     "Irak",        "Haiti",            "Curaçao"],
-}
-
-ALL_TEAMS: list[str] = sorted({t for teams in GROUPS.values() for t in teams})
-assert len(ALL_TEAMS) == 48, f"expected 48 teams, got {len(ALL_TEAMS)}"
+from schedule_data import GROUPS, TEAMS as ALL_TEAMS, SCHEDULE_MATCHES
 
 
-# ── Schedule: 72 group-stage games across Jun 11–27, 2026 ─────────────────────
+# ── Schedule: 72 real group-stage games (Jun 11–27, 2026) ─────────────────────
+SCHEDULE_DF = pd.DataFrame([
+    {**m, "HOME_TEAM_GOALS": None, "AWAY_TEAM_GOALS": None}
+    for m in SCHEDULE_MATCHES
+])
 
-_GROUP_STAGE_START = date(2026, 6, 11)
-_GROUP_STAGE_DAYS = 17  # Jun 11 → Jun 27 inclusive
+# Results for the first ~8 match days so the standings line chart has shape.
+def _seed_results() -> dict[int, tuple[int, int]]:
+    import random
+    rng = random.Random(2026)
+    out = {}
+    for i in range(1, 36):  # ~half the group stage
+        # Reasonable football scorelines: most teams score 0-3.
+        h, a = rng.randint(0, 3), rng.randint(0, 3)
+        out[i] = (h, a)
+    return out
 
-def _build_schedule() -> pd.DataFrame:
-    """Round-robin matchups for all 12 groups, spread across 17 days."""
-    all_matches: list[tuple[str, str, str]] = []
-    for letter in sorted(GROUPS.keys()):
-        for home, away in combinations(GROUPS[letter], 2):
-            all_matches.append((letter, home, away))
-    assert len(all_matches) == 72
-
-    rows = []
-    for i, (group_letter, home, away) in enumerate(all_matches):
-        day_offset = i * _GROUP_STAGE_DAYS // len(all_matches)
-        match_day = _GROUP_STAGE_START + timedelta(days=day_offset)
-        rows.append({
-            "ID": i + 1,
-            "MATCH_DAY": match_day,
-            "GROUP_LETTER": group_letter,
-            "MATCH": f"{home} vs {away}",
-            "HOME_TEAM_GOALS": None,
-            "AWAY_TEAM_GOALS": None,
-        })
-    return pd.DataFrame(rows)
-
-SCHEDULE_DF = _build_schedule()
-
-# Results for the first few games (opening days)
-_RESULTS = {
-    1: (1, 0), 2: (2, 1), 3: (0, 0), 4: (3, 2),
-    5: (1, 1), 6: (2, 2), 7: (0, 1), 8: (1, 3),
-}
+_RESULTS = _seed_results()
 
 RESULTS_DF = SCHEDULE_DF[["ID"]].copy()
 RESULTS_DF["HOME_TEAM_GOALS"] = RESULTS_DF["ID"].map(lambda i: _RESULTS.get(i, (None, None))[0])
@@ -105,9 +65,59 @@ _PLAYOFF_DF = pd.DataFrame(columns=["USER_EMAIL"] + _PREDICTION_BRACKET_COLS + [
 _PLAYOFF_RESULTS_DF = pd.DataFrame(columns=_RESULT_BRACKET_COLS + ["UPDATED"])
 
 
+# ── Seed: "Germany wins it all" sample prediction ────────────────────────────
+# Pre-populates the current mock user's bracket so the predictions page loads
+# with a full R32 pool and Saksa advancing through R16 → QF → SF → Final → 🏆.
+
+_DEMO_GROUP_W = {
+    "A": "Meksiko",   "B": "Kanada",    "C": "Brasilia",   "D": "Yhdysvallat",
+    "E": "Saksa",     "F": "Alankomaat","G": "Belgia",     "H": "Espanja",
+    "I": "Ranska",    "J": "Argentiina","K": "Portugali",  "L": "Englanti",
+}
+_DEMO_GROUP_R = {
+    "A": "Etelä-Korea",       "B": "Sveitsi",         "C": "Marokko",        "D": "Paraguay",
+    "E": "Norsunluurannikko", "F": "Japani",          "G": "Egypti",         "H": "Uruguay",
+    "I": "Senegal",           "J": "Itävalta",        "K": "Uzbekistan",     "L": "Kroatia",
+}
+_DEMO_THIRDS = [
+    "Tšekki", "Bosnia", "Skotlanti", "Australia",
+    "Ecuador", "Ruotsi", "Norja", "Kolumbia",
+]
+# Bracket advancers — Saksa shows up in every round.
+_DEMO_R16 = [
+    "Saksa", "Brasilia", "Argentiina", "Ranska", "Espanja", "Portugali",
+    "Alankomaat", "Englanti", "Belgia", "Meksiko", "Kanada", "Marokko",
+    "Kroatia", "Etelä-Korea", "Uruguay", "Senegal",
+]
+_DEMO_QF        = ["Saksa", "Brasilia", "Argentiina", "Ranska", "Espanja", "Portugali", "Englanti", "Belgia"]
+_DEMO_SF        = ["Saksa", "Brasilia", "Ranska", "Argentiina"]
+_DEMO_FINALISTS = ["Saksa", "Brasilia"]
+_DEMO_CHAMPION  = "Saksa"
+
+def _build_demo_playoff_row(email: str) -> dict:
+    row = {"USER_EMAIL": email}
+    for L in _GROUP_LETTERS:
+        row[f"GROUP_{L}_WINNER"]   = _DEMO_GROUP_W[L]
+        row[f"GROUP_{L}_RUNNERUP"] = _DEMO_GROUP_R[L]
+    for i, t in enumerate(_DEMO_THIRDS,    1): row[f"THIRD_{i}"]    = t
+    for i, t in enumerate(_DEMO_R16,       1): row[f"R16_{i}"]      = t
+    for i, t in enumerate(_DEMO_QF,        1): row[f"QF_{i}"]       = t
+    for i, t in enumerate(_DEMO_SF,        1): row[f"SF_{i}"]       = t
+    for i, t in enumerate(_DEMO_FINALISTS, 1): row[f"FINALIST_{i}"] = t
+    row["CHAMPION"]   = _DEMO_CHAMPION
+    row["TOP_SCORER"] = "Florian Wirtz"
+    row["DARK_HORSE"] = "Marokko"
+    row["INSERTED"]   = "2026-05-23 22:00:00"
+    return row
+
+
 # ── Shared predictions table ─────────────────────────────────────────────────
 
 MOCK_CURRENT_USER = "mika.heino@recordlydata.com"
+
+# Seed the demo playoff row for the current mock user so the bracket loads
+# fully populated.
+_PLAYOFF_DF = pd.DataFrame([_build_demo_playoff_row(MOCK_CURRENT_USER)])
 
 def _make_predictions(email: str, seed: int, complete_days: Optional[int] = None) -> pd.DataFrame:
     import random
@@ -129,8 +139,10 @@ def _make_predictions(email: str, seed: int, complete_days: Optional[int] = None
     return pd.DataFrame(rows)
 
 _PREDICTIONS_DF = pd.concat([
-    _make_predictions("matti.test@recordlydata.com", 42, complete_days=2),
+    _make_predictions("matti.test@recordlydata.com", 42),
     _make_predictions("liisa.test@recordlydata.com", 7),
+    _make_predictions("pekka.test@recordlydata.com", 99),
+    _make_predictions(MOCK_CURRENT_USER, 1337),
 ], ignore_index=True)
 
 
@@ -161,6 +173,12 @@ class MockSession:
     def sql(self, query: str) -> _MockResult:
         global _PREDICTIONS_DF, _PLAYOFF_DF, _PLAYOFF_RESULTS_DF
         q = query.upper()
+
+        # Activity-log INSERT used by streamlit_app.py for the auto-suspend
+        # Task in production. Must be checked before CURRENT_USER because the
+        # INSERT statement itself contains CURRENT_USER().
+        if "FIFA_VEIKKAUS_ACTIVITY" in q:
+            return _MockResult(pd.DataFrame({"rows_inserted": [0]}))
 
         if "CURRENT_USER" in q:
             return _MockResult(pd.DataFrame({"CURRENT_USER()": [MOCK_CURRENT_USER]}))
@@ -290,7 +308,7 @@ class MockSession:
             email = query.split("'")[1].lower() if "'" in query else MOCK_CURRENT_USER
             player_preds = _PREDICTIONS_DF[
                 _PREDICTIONS_DF["USER_EMAIL"] == email
-            ][["ID", "HOME_TEAM_GOALS", "AWAY_TEAM_GOALS"]]
+            ][["ID", "MATCH_DAY", "HOME_TEAM_GOALS", "AWAY_TEAM_GOALS"]]
 
             merged = player_preds.merge(
                 RESULTS_DF[["ID", "MATCH", "HOME_TEAM_GOALS", "AWAY_TEAM_GOALS"]],
@@ -316,7 +334,7 @@ class MockSession:
                 "AWAY_TEAM_GOALS_RESULT": "RESULT_AWAY",
                 "HOME_TEAM_GOALS_PRED":   "PRED_HOME",
                 "AWAY_TEAM_GOALS_PRED":   "PRED_AWAY",
-            })[["ID", "MATCH", "RESULT_HOME", "RESULT_AWAY", "PRED_HOME", "PRED_AWAY", "POINTS"]]
+            })[["ID", "MATCH", "MATCH_DAY", "RESULT_HOME", "RESULT_AWAY", "PRED_HOME", "PRED_AWAY", "POINTS"]]
             return _MockResult(result)
 
         if "FIFA_VEIKKAUS_PREDICTIONS" in q:

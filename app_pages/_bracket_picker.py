@@ -17,7 +17,7 @@ import streamlit as st
 
 _HTML = """<div class="bp-root">
   <div class="bp-grid"></div>
-  <div class="bp-hint">Klikkaa joukkuetta nostaaksesi seuraavaan vaiheeseen. Klikkaa uudelleen pudottaaksesi.</div>
+  <div class="bp-hint">Klikkaa joukkuetta nostaaksesi seuraavaan vaiheeseen. Klikkaa uudelleen pudottaaksesi. Jokainen kierros tarvitsee kaksi joukkuetta per ottelu seuraavalle kierrokselle.</div>
 </div>"""
 
 _CSS = """
@@ -194,6 +194,8 @@ export default function (component) {
   ];
 
   const teamsR32 = Array.isArray(data?.teams_r32) ? [...data.teams_r32] : [];
+  const teamLabels = (data && typeof data.team_labels === "object" && data.team_labels) || {};
+  const labelFor = (t) => teamLabels[t] || t;
 
   // Local mutable state per non-R32 stage; preserves user-chosen order.
   const initialPicks = data?.picks ?? {};
@@ -264,8 +266,8 @@ export default function (component) {
           chip.className = "bp-chip";
           chip.dataset.team = team;
           chip.dataset.stage = String(stage.id);
-          chip.textContent = team;
-          chip.title = team;
+          chip.textContent = labelFor(team);
+          chip.title = labelFor(team);
           if (isAdvanced(team, stage.id)) chip.classList.add("advanced");
           if (stage.id === 5) chip.classList.add("terminal");
           if (!firstRender && !prevSet.has(team)) {
@@ -316,6 +318,10 @@ export default function (component) {
     chip.classList.add("flash");
   }
 
+  function stageCount(level) {
+    return level === 0 ? teamsR32.length : state[level].length;
+  }
+
   function handleClick(team, stage, chip) {
     if (stage === 5) return; // can't advance past champion
     const nextLevel = stage + 1;
@@ -323,12 +329,22 @@ export default function (component) {
     let advancing = false;
 
     if (state[nextLevel].includes(team)) {
-      // Demote from nextLevel and every higher level.
+      // Demote from nextLevel and every higher level (always allowed).
       for (let L = nextLevel; L <= 5; L++) {
         state[L] = state[L].filter((t) => t !== team);
       }
     } else {
       if (state[nextLevel].length >= cap) {
+        flash(chip);
+        return;
+      }
+      // Branching-factor rule: each match in stage N+1 needs 2 teams from
+      // stage N. So after this advance, stageCount(stage) >= 2*(N+1 count).
+      // This prevents the "single team marches to Champion" bug (Champion
+      // needs Final >= 2) while still letting users fill rounds in any
+      // order they like.
+      const nextCountAfter = state[nextLevel].length + 1;
+      if (stageCount(stage) < 2 * nextCountAfter) {
         flash(chip);
         return;
       }
@@ -400,6 +416,7 @@ _BRACKET_COMPONENT = st.components.v2.component(
 def bracket_picker(
     *,
     teams_r32: list[str],
+    team_labels: dict[str, str] | None = None,
     initial_picks: dict | None = None,
     key: str = "bracket_picker",
     on_change: Callable[[], None] | None = None,
@@ -425,7 +442,11 @@ def bracket_picker(
     }
     result = _BRACKET_COMPONENT(
         key=key,
-        data={"teams_r32": list(teams_r32), "picks": picks_for_data},
+        data={
+            "teams_r32": list(teams_r32),
+            "team_labels": dict(team_labels or {}),
+            "picks": picks_for_data,
+        },
         on_picks_change=on_change or (lambda: None),
     )
     picks = getattr(result, "picks", None) or picks_for_data or {}

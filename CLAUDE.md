@@ -4,7 +4,7 @@ Full project documentation is in **AGENTS.md**. Read that file for file structur
 
 ## Essential rules for Claude Code
 
-- **Runtime**: Snowflake warehouse (SiS), Python 3.11, packages from Snowflake Anaconda Channel only
+- **Runtime**: Snowflake SiS **container runtime** on `FIFA_VEIKKAUS_POOL` (XS, auto-suspended by `FIFA_VEIKKAUS_AUTOSTOP_TASK`), Python 3.11. Anaconda channel preferred; pip allowed.
 - **Session**: always `session = st.session_state.snowpark_session`
 - **Images**: live in `assets/`; loaded via base64 CSS injection (Snowflake CSP blocks external URLs)
 - **NaN vs None**: Snowpark returns NaN for NULL numerics — always use `pd.isna()`, never `is None`

@@ -2,39 +2,47 @@
 
 Internal football prediction competition tied to the **2026 FIFA World Cup** (USA, Canada & Mexico, June 11 – July 19, 2026). Users predict scores for all 72 group stage games before the tournament starts; standings are computed as results come in. **Prediction deadline: June 11, 2026 at 19:00 Finnish time (EEST)** — after this, predictions are locked.
 
-Runs as a **Streamlit in Snowflake (SiS) warehouse runtime** app. Each viewer gets a personal Streamlit server instance. The app uses Snowpark for all database access; there is no external backend.
+Runs as a **Streamlit in Snowflake (SiS) container runtime** app on the `FIFA_VEIKKAUS_POOL` compute pool. Each viewer gets a personal Streamlit server instance. The app uses Snowpark for all database access; there is no external backend. The container runtime is required because the warehouse runtime strips `st.components.v2.component` (the four CCv2 pickers).
 
 ---
 
 # Directory Structure
 
 ```
-streamlit_app.py               # Production entry point (Snowflake)
-streamlit_app_local.py         # Local dev entry point (MockSession, no Snowflake needed)
-mock_session.py                # MockSession — mimics Snowpark Session API for local dev
-trivia.py                      # MATCH_TRIVIA dict: one fact per group-stage matchup
-environment.yml                # Snowflake warehouse runtime dependencies (Anaconda channel)
-pyproject.toml                 # Local dev dependencies (uv) — NOT deployed to Snowflake
+streamlit_app.py               # Production entry point — uses st.connection("snowflake").session()
+streamlit_app_local.py         # Local dev entry point — instantiates MockSession instead of Snowpark
+mock_session.py                # MockSession class: fakes the Snowpark session.sql(...).collect()/.to_pandas()
+                               #   surface, seeds the 72-game schedule + demo predictions + Saksa-wins playoff
+pyproject.toml                 # Container-runtime dependency manifest (streamlit[snowflake]==1.51.0, pandas)
+                               #   Also used by uv for local dev
 AGENTS.md                      # This file
 CLAUDE.md                      # Claude Code essentials (brief, points here)
 README.md                      # Project overview and administration guide
-assets/
-  logo_2026.png                # FIFA World Cup 2026 logo — shown at top of every page
-  saku-koivu.jpg               # Background image — Standings page (placeholder, swap for football image)
-  ioag9w7poe8ayrodgmlc.webp    # Background image — My Predictions + Rules pages (placeholder)
-  logo.png                     # Legacy logo
-  saku-koivu-tuulettaa-maalia-naganossa-1998.avif  # Legacy source (placeholder)
+assets/                        # Loaded via base64 CSS injection — Snowflake CSP blocks external URLs
+  logo_2026.png                #   FIFA 2026 trophy logo, color-graded into the Maradona palette; shown
+                               #   at the top of every page
+  maradona.gif                 #   Tournament-spirit background; rendered at 16% opacity as a ghosted
+                               #   watermark behind the 90s-arcade theme on the predictions page
+data/                          # Canonical reference data — single source of truth, do not duplicate
+  schedule_2026.json           #   48 teams (en+fi+flag), 12 groups, 16 venues, all 104 matches
+                               #   (72 group + 32 knockout) with date/time/tz/venue
+  build_schedule_2026.py       #   Builder script — declarative source for the JSON above. Edit + re-run
+                               #   to regenerate after schedule corrections
+db/                            # Snowflake bootstrap
+  setup.sql                    #   Fresh-account: warehouse + DB + schema + tables + roles + grants +
+                               #   stage + Streamlit object + schedule seed (idempotent MERGE)
 tests/
   __init__.py
-  test_trivia.py               # Smoke tests for trivia.py (pure Python, no Snowflake)
 app_pages/
   __init__.py
-  my_predictions.py            # Combined submit + update predictions page
-  standings.py                 # Leaderboard + per-player match detail
+  my_predictions.py            # Group-stage trophy slider + playoff bracket picker
+  standings.py                 # Leaderboard + points-over-time chart + all-players prediction table
   rules.py                     # Scoring rules and prize info
   admin_results.py             # Admin page: enter match results (restricted by email)
-  update_prediction.py         # Legacy — not in navigation
-  prediction.py                # Legacy — not in navigation
+  _momentum_slider.py          # CCv2 component: drag-the-trophy score picker
+  _bracket_picker.py           # CCv2 component: visual R32 → Champion bracket
+  _group_picker.py             # CCv2 component: per-group winner + runner-up selector
+  _team_grid_picker.py         # CCv2 component: click-to-pick chip grid (best thirds)
 ```
 
 ---
@@ -59,24 +67,150 @@ app_pages/
 
 | Layer | Technology |
 |---|---|
-| UI framework | Streamlit 1.35.0 (warehouse runtime, see supported versions below) |
-| Runtime | Snowflake SiS warehouse runtime, Python 3.11 |
+| UI framework | Streamlit 1.51.0 (pinned in `pyproject.toml`) |
+| Runtime | Snowflake SiS **container runtime** (`SYSTEM$ST_CONTAINER_RUNTIME_PY3_11`), Python 3.11 |
+| Compute pool | `FIFA_VEIKKAUS_POOL` (CPU_X64_XS, 1 node) |
 | Database | Snowflake Snowpark (`snowflake-snowpark-python`) |
 | Data manipulation | pandas |
 | Local dev | `MockSession` (no Snowflake required), `uv` for deps |
 | Tests | pytest |
 | Formatter | Ruff |
 
-### Supported Streamlit versions (warehouse runtime)
+### Streamlit version pin
 
-Pin explicitly in `environment.yml`. Always verify against the live doc before upgrading:
-https://docs.snowflake.com/en/developer-guide/streamlit/app-development/dependency-management#supported-versions-of-the-streamlit-library-in-warehouse-runtimes
+Container runtime is more permissive than warehouse runtime — most pip-installable Streamlit versions work. The current pin is **1.51.0** (first release with stable `st.components.v2.component`). Always verify against the live doc before upgrading:
+https://docs.snowflake.com/en/developer-guide/streamlit/app-development/dependency-management
 
+---
+
+# Container Runtime Reference (Template for New Projects)
+
+This project serves as the **template** for creating Streamlit-in-Snowflake apps on the container runtime. The following sections document the critical differences from warehouse runtime and the gotchas encountered during migration.
+
+### Required infrastructure (Snowflake objects)
+
+| Object | Purpose |
+|---|---|
+| Compute pool (`CPU_X64_XS`, 1 node) | Hosts the Streamlit container process |
+| Internal stage | Source files — `FROM` copies them into the app's embedded versioned stage |
+| Network rule + External Access Integration (EAI) | Allows the container to reach PyPI for `pip install` |
+| `pyproject.toml` in source root | Declares Python dependencies for the container (replaces `environment.yml`) |
+| `QUERY_WAREHOUSE` (XS) | Executes Snowpark SQL queries issued by the app |
+
+### CREATE STREAMLIT syntax (container runtime)
+
+```sql
+CREATE STREAMLIT my_app
+    FROM '@my_db.my_schema.my_stage'
+    MAIN_FILE = 'streamlit_app.py'
+    RUNTIME_NAME = 'SYSTEM$ST_CONTAINER_RUNTIME_PY3_11'
+    COMPUTE_POOL = my_pool
+    QUERY_WAREHOUSE = 'my_wh'
+    EXTERNAL_ACCESS_INTEGRATIONS = (my_pypi_eai);
+
+ALTER STREAMLIT my_app ADD LIVE VERSION FROM LAST;
 ```
-1.52.2, 1.52.1, 1.52.0, 1.51.0, 1.50.0, 1.49.1, 1.48.0, 1.47.0,
-1.46.1, 1.45.1, 1.45.0, 1.44.1, 1.44.0, 1.42.0, 1.39.0, 1.35.0,
-1.31.1, 1.29.0, 1.26.0, 1.22.0
+
+**Critical:** `ADD LIVE VERSION FROM LAST` is mandatory — without it the app returns "not live" errors.
+
+### Viewer identity
+
+| API | Returns |
+|---|---|
+| `st.user.email` | Viewer's email (e.g. `mika.heino@recordlydata.com`) |
+| `st.user.user_name` | Viewer's Snowflake username (e.g. `MIKA.HEINO`) |
+| `CURRENT_USER()` in SQL | **Service account** (e.g. `Stplatstreamlit15690228`) — NOT the viewer |
+| `st.connection("snowflake-callers-rights")` | Session running as the viewer (restricted caller's rights, Preview) |
+
+### Session management
+
+```python
+# Container runtime (correct)
+session = st.connection("snowflake").session()
+user_email = st.user.email.lower()
+
+# Warehouse runtime (legacy — DO NOT USE in container runtime)
+# from snowflake.snowpark.context import get_active_session
+# session = get_active_session()  # NOT THREAD-SAFE
 ```
+
+### Dependency management
+
+- Container runtime uses **`pyproject.toml`** or **`requirements.txt`** (searched in entrypoint directory, then up).
+- `environment.yml` is **ignored** — it only works in warehouse runtime.
+- Without an EAI, only pre-installed packages are available and version pins will fail.
+- Pin with `==` (PyPI syntax), not `=` (conda syntax).
+
+Minimal `pyproject.toml`:
+```toml
+[project]
+name = "my-app"
+version = "1.0.0"
+requires-python = ">=3.11"
+dependencies = [
+    "streamlit[snowflake]==1.51.0",
+    "pandas",
+]
+```
+
+### External Access Integration (PyPI)
+
+Required to install any pinned or extra packages:
+
+```sql
+CREATE OR REPLACE NETWORK RULE pypi_network_rule
+    MODE = EGRESS  TYPE = HOST_PORT
+    VALUE_LIST = ('pypi.org', 'files.pythonhosted.org');
+
+CREATE OR REPLACE EXTERNAL ACCESS INTEGRATION pypi_access_integration
+    ALLOWED_NETWORK_RULES = (pypi_network_rule)
+    ENABLED = TRUE;
+```
+
+Then attach to the Streamlit object: `EXTERNAL_ACCESS_INTEGRATIONS = (pypi_access_integration)`.
+
+### Updating deployed code
+
+Container runtime apps use an **embedded versioned stage** (not the source stage directly). After PUT-ing files to the source stage:
+
+```sql
+-- Get the live URI
+DESCRIBE STREAMLIT my_app;  -- look at live_version_location_uri
+
+-- Copy specific changed files into the live version
+COPY FILES INTO '<live_version_location_uri>'
+    FROM @my_stage FILES = ('streamlit_app.py', 'app_pages/page.py');
+```
+
+Changes are visible to viewers on their next interaction — no restart needed.
+
+### Key differences: container vs warehouse runtime
+
+| Aspect | Warehouse runtime | Container runtime |
+|---|---|---|
+| `CREATE STREAMLIT` | `ROOT_LOCATION` or `FROM` | `FROM` only (+ `ADD LIVE VERSION`) |
+| Dependencies | `environment.yml` (conda) | `pyproject.toml` / `requirements.txt` (pip/uv) |
+| Session | `get_active_session()` | `st.connection("snowflake").session()` |
+| Viewer identity | `CURRENT_USER()` = viewer | `st.user.email` / `st.user.user_name` |
+| `CURRENT_USER()` | Viewer's username | Internal service account |
+| Execution model | One instance per viewer | One shared instance, all viewers |
+| Caching | Not shared between sessions | `st.cache_data` / `st.cache_resource` shared |
+| Thread safety | Not required | Required (concurrent viewers) |
+| Custom components (CCv2) | Stripped by frontend allowlist | Fully supported |
+| Cold start | Per-viewer (few seconds) | Pool resume (~60-90s) then fast for all |
+| Stored procedure syntax | `ALTER COMPUTE POOL ... STOP ALL` works | Must use `EXECUTE IMMEDIATE` inside SQL SP |
+
+### Checklist for new container-runtime apps
+
+1. Create compute pool (`CPU_X64_XS`, `AUTO_RESUME=TRUE`, `INITIALLY_SUSPENDED=TRUE`)
+2. Create network rule + EAI for PyPI
+3. Create `pyproject.toml` with `streamlit[snowflake]==<version>` + other deps
+4. Use `st.connection("snowflake").session()` for Snowpark
+5. Use `st.user.email` / `st.user.user_name` for viewer identity
+6. Use `FROM` syntax in `CREATE STREAMLIT` + `ADD LIVE VERSION FROM LAST`
+7. Attach EAI: `EXTERNAL_ACCESS_INTEGRATIONS = (my_eai)`
+8. Grant `USAGE` on compute pool + Streamlit object to viewer roles
+9. Consider activity-driven auto-suspend Task for cost control
 
 ---
 
@@ -98,9 +232,12 @@ https://docs.snowflake.com/en/developer-guide/streamlit/app-development/dependen
 # Don'ts
 
 - **Never bypass Snowflake RBAC.** All database actions must go through the assigned role (`FIFA_VEIKKAUS_PLAYER_ROLE` or `FIFA_VEIKKAUS_ADMIN_ROLE`). Never use `ACCOUNTADMIN` for app queries.
-- **Never commit credentials or `.env` files.** The Snowflake connection is handled by `get_active_session()` in production and `MockSession` locally — no hardcoded connection strings.
+- **Never commit credentials or `.env` files.** The Snowflake connection is handled by `st.connection("snowflake")` in production and `MockSession` locally — no hardcoded connection strings.
 - **Never run destructive SQL (`DROP`, `TRUNCATE`, `DELETE`) in production** without explicit user instruction and confirmation.
-- **Never add packages to `environment.yml`** unless they exist in the Snowflake Anaconda Channel (https://repo.anaconda.com/pkgs/snowflake/). No PyPI packages in production.
+- **Never use `get_active_session()`** — it is not thread-safe and returns the service account in container runtime. Always use `st.connection("snowflake").session()`.
+- **Never use `CURRENT_USER()` to identify the viewer** — it returns the internal service account (e.g. `Stplatstreamlit15690228`) in container runtime. Use `st.user.email` or `st.user.user_name` instead.
+- **Never use `ROOT_LOCATION` in `CREATE STREAMLIT`** — it only supports warehouse runtime. Always use `FROM` + `ADD LIVE VERSION FROM LAST`.
+- **Never use `environment.yml` for container runtime** — it is ignored. Use `pyproject.toml` or `requirements.txt`.
 - **Never use `st.experimental_*` APIs** — they are removed in current Streamlit versions and will break on deployment.
 - **Never skip `--no-verify`** on git commits unless the user explicitly requests it.
 - **Never push to `main`** without user confirmation.
@@ -113,7 +250,11 @@ https://docs.snowflake.com/en/developer-guide/streamlit/app-development/dependen
 |---|---|
 | Database | `STREAMLIT_APPS` |
 | Schema | `FIFA_VEIKKAUS` |
-| Warehouse | `FIFA_VEIKKAUS_WH` (XS, auto-suspend 60s) |
+| Warehouse | `FIFA_VEIKKAUS_WH` (XS, auto-suspend 60s) — used as `QUERY_WAREHOUSE` for Snowpark SQL |
+| Compute pool | `FIFA_VEIKKAUS_POOL` (CPU_X64_XS, 1 node, AUTO_SUSPEND_SECS 300) — hosts the Streamlit container |
+| EAI | `PYPI_ACCESS_INTEGRATION` — allows container to install packages from PyPI |
+| Activity table | `FIFA_VEIKKAUS_ACTIVITY` (TS, USER_EMAIL) — written on every session start |
+| Auto-suspend Task | `FIFA_VEIKKAUS_AUTOSTOP_TASK` (every 30 min) — suspends pool if no activity in last 60 min |
 | Stage | `FIFA_VEIKKAUS_STAGE` |
 | App object | `FIFA_VEIKKAUS_APP` |
 | Player role | `FIFA_VEIKKAUS_PLAYER_ROLE` → DB role `FIFA_VEIKKAUS_USER` |
@@ -131,9 +272,81 @@ https://docs.snowflake.com/en/developer-guide/streamlit/app-development/dependen
 | `FIFA_VEIKKAUS_PLAYOFF_RESULTS` | Actual knockout bracket + top scorer (admin-filled, single row) |
 | `{NAME}_FIFA_VEIKKAUS` | Legacy per-player predictions (pre-v1.0), no longer written |
 
+### Production deployment workflow
+
+There are three scenarios. Pick the one that fits the situation and follow
+the steps in order — each one composes the more detailed sub-sections that
+follow.
+
+**A. First-time deploy to a brand-new Snowflake account.** End-to-end ≈ 5
+minutes once you have admin access:
+
+1. **Edit `db/setup.sql` section 9** — uncomment + adjust the
+   `GRANT ROLE … TO USER …` block for every participant (player or admin).
+2. **Run the bootstrap** as `ACCOUNTADMIN`:
+   `snowsql -a <account> -u <admin_user> -f db/setup.sql`
+   → creates warehouse / database / schema / tables / view / roles / stage,
+   seeds the 72-game schedule. The `CREATE STREAMLIT …` line at the bottom
+   will warn until step 4 — that's expected.
+3. **Upload the source tree** to `@FIFA_VEIKKAUS_STAGE` using the `PUT`
+   block in *Deploying files after changes* below.
+4. **Re-run** the `CREATE STREAMLIT FIFA_VEIKKAUS_APP` statement (it's
+   idempotent — same script). The app object now resolves the uploaded files.
+5. **Verify** by opening the app URL from
+   `SHOW STREAMLITS LIKE 'FIFA_VEIKKAUS_APP';` and confirming the predictions
+   page renders 12 group expanders with the real teams.
+
+**B. Code change (no schema change, no data change).** This is the common
+path during the tournament — UI tweaks, bug fixes, new components:
+
+1. **PUT the changed files** to `@FIFA_VEIKKAUS_STAGE` (see block below).
+2. **Copy into the live version:**
+   ```sql
+   COPY FILES INTO 'snow://streamlit/STREAMLIT_APPS.FIFA_VEIKKAUS.FIFA_VEIKKAUS_APP/versions/live/'
+       FROM @FIFA_VEIKKAUS_STAGE FILES = ('streamlit_app.py', 'app_pages/my_predictions.py');
+   ```
+3. Viewers see updates on their next interaction (container runtime reflects
+   changes immediately — no `CREATE STREAMLIT` or `DROP STREAMLIT` needed).
+
+**C. Schema / reference-data change.** Touches any of: tables, view, stage,
+roles, `data/schedule_2026.json` (which the seed MERGE pulls from), or a
+column shape:
+
+1. **Run the migration SQL FIRST** as `ACCOUNTADMIN` — either re-run the
+   relevant section of `db/setup.sql` (e.g. section 7 for schedule
+   corrections) or a version-specific migration block in `RELEASE_NOTES.md`.
+   The MERGE statements are idempotent and use `WHEN MATCHED THEN UPDATE`
+   so re-running on previously seeded data corrects rows in place.
+2. **Verify** the sanity-check `SELECT COUNT(*)` returns expected counts
+   (section 10 of `db/setup.sql`).
+3. **Then** deploy the code per scenario B.
+
+Deploying code before the migration in scenario C breaks the running app —
+the new code expects new columns / new strings that the DB doesn't have yet.
+
+### Fresh-account bootstrap
+
+For a brand-new Snowflake account, run `db/setup.sql` end-to-end as
+`ACCOUNTADMIN`. It is idempotent:
+
+```bash
+snowsql -a <account> -u <admin_user> -f db/setup.sql
+```
+
+The script creates the warehouse, database, schema, tables, view, stage,
+two roles (`FIFA_VEIKKAUS_PLAYER_ROLE`, `FIFA_VEIKKAUS_ADMIN_ROLE`), all
+required grants, and seeds the 72-game group-stage schedule. It also
+creates the Streamlit object — **upload the source files to
+`FIFA_VEIKKAUS_STAGE` first** (PUT block below), then either re-run the
+script or just the `CREATE STREAMLIT` section.
+
+The last section (section 9) of `db/setup.sql` is commented-out
+`GRANT ROLE ... TO USER ...` templates — uncomment + adjust for the real
+participant accounts before running, or run those statements separately.
+
 ### Deploying files after changes
 
-Upload changed files to the stage. The app picks up new files on the next viewer session — no need to drop or recreate the app object. **Do NOT drop the app** — the app URL is shared with end users and dropping would change it.
+Upload changed files to the stage, then copy them into the live version. **Do NOT drop the app** — the app URL is shared with end users and dropping would change it.
 
 ```sql
 USE ROLE ACCOUNTADMIN;
@@ -142,20 +355,34 @@ USE SCHEMA FIFA_VEIKKAUS;
 USE WAREHOUSE FIFA_VEIKKAUS_WH;
 
 -- Upload all source files
-PUT file:///path/to/streamlit_app.py @FIFA_VEIKKAUS_STAGE/ AUTO_COMPRESS=FALSE OVERWRITE=TRUE;
-PUT file:///path/to/app_pages/my_predictions.py @FIFA_VEIKKAUS_STAGE/app_pages/ AUTO_COMPRESS=FALSE OVERWRITE=TRUE;
-PUT file:///path/to/app_pages/standings.py @FIFA_VEIKKAUS_STAGE/app_pages/ AUTO_COMPRESS=FALSE OVERWRITE=TRUE;
-PUT file:///path/to/app_pages/rules.py @FIFA_VEIKKAUS_STAGE/app_pages/ AUTO_COMPRESS=FALSE OVERWRITE=TRUE;
-PUT file:///path/to/app_pages/admin_results.py @FIFA_VEIKKAUS_STAGE/app_pages/ AUTO_COMPRESS=FALSE OVERWRITE=TRUE;
-PUT file:///path/to/trivia.py @FIFA_VEIKKAUS_STAGE/ AUTO_COMPRESS=FALSE OVERWRITE=TRUE;
+PUT file:///path/to/streamlit_app.py                @FIFA_VEIKKAUS_STAGE/           AUTO_COMPRESS=FALSE OVERWRITE=TRUE;
+PUT file:///path/to/schedule_data.py                @FIFA_VEIKKAUS_STAGE/           AUTO_COMPRESS=FALSE OVERWRITE=TRUE;
+PUT file:///path/to/app_pages/my_predictions.py     @FIFA_VEIKKAUS_STAGE/app_pages/ AUTO_COMPRESS=FALSE OVERWRITE=TRUE;
+PUT file:///path/to/app_pages/standings.py          @FIFA_VEIKKAUS_STAGE/app_pages/ AUTO_COMPRESS=FALSE OVERWRITE=TRUE;
+PUT file:///path/to/app_pages/rules.py              @FIFA_VEIKKAUS_STAGE/app_pages/ AUTO_COMPRESS=FALSE OVERWRITE=TRUE;
+PUT file:///path/to/app_pages/admin_results.py      @FIFA_VEIKKAUS_STAGE/app_pages/ AUTO_COMPRESS=FALSE OVERWRITE=TRUE;
+PUT file:///path/to/app_pages/_momentum_slider.py   @FIFA_VEIKKAUS_STAGE/app_pages/ AUTO_COMPRESS=FALSE OVERWRITE=TRUE;
+PUT file:///path/to/app_pages/_bracket_picker.py    @FIFA_VEIKKAUS_STAGE/app_pages/ AUTO_COMPRESS=FALSE OVERWRITE=TRUE;
+PUT file:///path/to/app_pages/_group_picker.py      @FIFA_VEIKKAUS_STAGE/app_pages/ AUTO_COMPRESS=FALSE OVERWRITE=TRUE;
+PUT file:///path/to/app_pages/_team_grid_picker.py  @FIFA_VEIKKAUS_STAGE/app_pages/ AUTO_COMPRESS=FALSE OVERWRITE=TRUE;
+PUT file:///path/to/app_pages/_theme.py             @FIFA_VEIKKAUS_STAGE/app_pages/ AUTO_COMPRESS=FALSE OVERWRITE=TRUE;
+PUT file:///path/to/app_pages/_celebrate.py         @FIFA_VEIKKAUS_STAGE/app_pages/ AUTO_COMPRESS=FALSE OVERWRITE=TRUE;
+
+-- Reference data (groups, teams, flags, schedule — schedule_data.py reads this)
+PUT file:///path/to/data/schedule_2026.json @FIFA_VEIKKAUS_STAGE/data/ AUTO_COMPRESS=FALSE OVERWRITE=TRUE;
 
 -- Assets (only when images change)
 PUT file:///path/to/assets/logo_2026.png @FIFA_VEIKKAUS_STAGE/assets/ AUTO_COMPRESS=FALSE OVERWRITE=TRUE;
-PUT file:///path/to/assets/saku-koivu.jpg @FIFA_VEIKKAUS_STAGE/assets/ AUTO_COMPRESS=FALSE OVERWRITE=TRUE;
-PUT file:///path/to/assets/ioag9w7poe8ayrodgmlc.webp @FIFA_VEIKKAUS_STAGE/assets/ AUTO_COMPRESS=FALSE OVERWRITE=TRUE;
+PUT file:///path/to/assets/maradona.gif  @FIFA_VEIKKAUS_STAGE/assets/ AUTO_COMPRESS=FALSE OVERWRITE=TRUE;
+PUT file:///path/to/assets/pirlo.gif     @FIFA_VEIKKAUS_STAGE/assets/ AUTO_COMPRESS=FALSE OVERWRITE=TRUE;
 
--- Dependencies (only when environment.yml changes)
-PUT file:///path/to/environment.yml @FIFA_VEIKKAUS_STAGE/ AUTO_COMPRESS=FALSE OVERWRITE=TRUE;
+-- Dependencies (only when pyproject.toml changes)
+PUT file:///path/to/pyproject.toml @FIFA_VEIKKAUS_STAGE/ AUTO_COMPRESS=FALSE OVERWRITE=TRUE;
+
+-- Copy changed files into the live version (container runtime picks up immediately)
+COPY FILES INTO 'snow://streamlit/STREAMLIT_APPS.FIFA_VEIKKAUS.FIFA_VEIKKAUS_APP/versions/live/'
+    FROM @FIFA_VEIKKAUS_STAGE
+    FILES = ('streamlit_app.py', 'app_pages/my_predictions.py');  -- list only what changed
 ```
 
 Only drop and recreate the app as a last resort (e.g., the app is completely broken and won't start). This changes the app URL and breaks existing bookmarks/shared links:
@@ -165,9 +392,37 @@ Only drop and recreate the app as a last resort (e.g., the app is completely bro
 DROP STREAMLIT FIFA_VEIKKAUS_APP;
 
 CREATE STREAMLIT FIFA_VEIKKAUS_APP
-    ROOT_LOCATION = '@FIFA_VEIKKAUS_STAGE'
+    FROM '@STREAMLIT_APPS.FIFA_VEIKKAUS.FIFA_VEIKKAUS_STAGE'
     MAIN_FILE = 'streamlit_app.py'
-    QUERY_WAREHOUSE = 'FIFA_VEIKKAUS_WH';
+    RUNTIME_NAME  = 'SYSTEM$ST_CONTAINER_RUNTIME_PY3_11'
+    COMPUTE_POOL  = FIFA_VEIKKAUS_POOL
+    QUERY_WAREHOUSE = 'FIFA_VEIKKAUS_WH'
+    EXTERNAL_ACCESS_INTEGRATIONS = (PYPI_ACCESS_INTEGRATION);
+
+ALTER STREAMLIT FIFA_VEIKKAUS_APP ADD LIVE VERSION FROM LAST;
+```
+
+### Auto-suspend behaviour (cost control)
+
+The Streamlit container itself runs on `FIFA_VEIKKAUS_POOL` (CPU_X64_XS, ~0.06 credits/hr). To avoid 24/7 billing during the tournament, a Snowflake Task force-suspends the pool when idle:
+
+1. `streamlit_app.py` writes a row to `FIFA_VEIKKAUS_ACTIVITY` on each session start (try/except, never fatal).
+2. `FIFA_VEIKKAUS_AUTOSTOP_TASK` runs every 30 minutes. If `MAX(TS) < now() - 60 min`, it calls `ALTER COMPUTE POOL FIFA_VEIKKAUS_POOL STOP_ALL; SUSPEND;`.
+3. When the next viewer opens the app URL, `AUTO_RESUME = TRUE` on the pool brings it back. Cold start: **~60-90 seconds** of loading spinner before the page renders.
+
+Knobs (in `db/setup.sql` section 7c):
+
+- Idle threshold (currently 60 min): adjust the `DATEADD(minute, -60, ...)` inside `FIFA_VEIKKAUS_AUTOSTOP_SP`.
+- Poll interval (currently 30 min): adjust `SCHEDULE = '30 MINUTE'` on `FIFA_VEIKKAUS_AUTOSTOP_TASK`.
+- Disable temporarily during heavy tournament hours: `ALTER TASK FIFA_VEIKKAUS_AUTOSTOP_TASK SUSPEND;` (resume with `RESUME`).
+
+Inspect:
+
+```sql
+SELECT * FROM TABLE(INFORMATION_SCHEMA.TASK_HISTORY(TASK_NAME=>'FIFA_VEIKKAUS_AUTOSTOP_TASK'))
+ORDER BY SCHEDULED_TIME DESC LIMIT 20;
+
+SHOW COMPUTE POOLS LIKE 'FIFA_VEIKKAUS_POOL';
 ```
 
 ### Database migrations
@@ -180,7 +435,7 @@ Schema and data migrations live in `RELEASE_NOTES.md` under the corresponding ve
 2. **Verify** the sanity-check counts return `0`.
 3. **Then deploy the code** via the `PUT` block above.
 
-If you deploy the code first, the running app will still query the old (un-migrated) values and most lookups (e.g. `_FLAGS.get(...)`, `MATCH_TRIVIA.get(...)`) will silently miss — flags disappear, trivia stops rendering, playoff defaults don't pre-populate.
+If you deploy the code first, the running app will still query the old (un-migrated) values and most lookups (e.g. `_FLAGS.get(...)`) will silently miss — flags disappear and playoff defaults don't pre-populate.
 
 Migrations are written to be **idempotent**: running them again on already-migrated data is a no-op because the source strings (English names) no longer exist in the table.
 
@@ -188,9 +443,8 @@ Migrations are written to be **idempotent**: running them again on already-migra
 
 All team names in the database and UI are stored **in Finnish**. Keep the translation map in sync across:
 
-- `mock_session.py` (`GROUPS_A_THROUGH_L`)
+- `mock_session.py` (`GROUPS`)
 - `_FLAGS` dicts in `app_pages/*.py`
-- `trivia.py` keys
 - Any migration SQL that touches team strings
 
 Examples (non-exhaustive — full map lives next to `_FLAGS`):
@@ -241,7 +495,7 @@ There is no CI/CD pipeline. Deploys are manual SQL PUT commands (see Snowflake-S
 
 # Local Development
 
-The local entry point `streamlit_app_local.py` swaps `get_active_session()` for `MockSession`, so the full UI runs without a Snowflake connection.
+The local entry point `streamlit_app_local.py` swaps `st.connection("snowflake").session()` for `MockSession`, so the full UI runs without a Snowflake connection.
 
 ```bash
 # Start the local server (default port 8501)
@@ -252,7 +506,7 @@ python3 -m streamlit run streamlit_app_local.py --server.port 8501 --server.head
 
 ### Hot-reload gotcha: imported modules are cached
 
-Streamlit re-runs the script on each browser refresh, but Python's import system caches imported modules. Edits to **`trivia.py`, `mock_session.py`, or any other module imported by a page** are **not** picked up by hot reload — only edits to the page file itself reload cleanly.
+Streamlit re-runs the script on each browser refresh, but Python's import system caches imported modules. Edits to **`mock_session.py`, the `app_pages/_*.py` CCv2 components, or any other module imported by a page** are **not** picked up by hot reload — only edits to the page file itself reload cleanly.
 
 When you change an imported module, restart the server:
 
@@ -265,7 +519,7 @@ kill <PID>
 python3 -m streamlit run streamlit_app_local.py --server.port 8501 --server.headless true
 ```
 
-If you see stale data after editing `trivia.py` or `mock_session.py` and a refresh doesn't fix it, this is the cause.
+If you see stale behaviour after editing `mock_session.py` or any imported component module and a refresh doesn't fix it, this is the cause.
 
 ### MockSession scope
 
@@ -312,7 +566,7 @@ python3 -m playwright install chromium
        page.screenshot(path="/tmp/predictions.png", full_page=True)
        browser.close()
    ```
-4. **Restart the server when you edit `trivia.py`, `mock_session.py`, or any imported module.** See the hot-reload gotcha above. Page-file edits (`app_pages/*.py`, `streamlit_app_local.py`) do hot-reload — a `page.reload()` is enough.
+4. **Restart the server when you edit `mock_session.py` or any imported component module.** See the hot-reload gotcha above. Page-file edits (`app_pages/*.py`, `streamlit_app_local.py`) do hot-reload — a `page.reload()` is enough.
 
 ### Verifying CSS changes
 

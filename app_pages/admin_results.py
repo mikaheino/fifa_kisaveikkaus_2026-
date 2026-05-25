@@ -1,33 +1,9 @@
-import base64
-import os
 import streamlit as st
 import pandas as pd
 
-# ── Background image ──────────────────────────────────────────────────────────
-_img_path = os.path.join(os.path.dirname(__file__), "..", "assets", "maradona.gif")
-if os.path.exists(_img_path):
-    _b64 = base64.b64encode(open(_img_path, "rb").read()).decode()
-    st.markdown(
-        f"""
-        <style>
-        [data-testid="stAppViewContainer"] {{
-            background-image: url("data:image/gif;base64,{_b64}");
-            background-size: cover;
-            background-position: center;
-            background-attachment: fixed;
-        }}
-        [data-testid="stAppViewContainer"]::before {{
-            content: "";
-            position: fixed;
-            inset: 0;
-            background: rgba(20, 14, 8, 0.72);
-            pointer-events: none;
-            z-index: 0;
-        }}
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
+from app_pages._theme import apply_theme
+
+apply_theme()
 
 # ── Access control ────────────────────────────────────────────────────────────
 ADMIN_EMAILS = {
@@ -47,44 +23,9 @@ SCHEDULE_TABLE = f"{SCHEMA}.FIFA_VEIKKAUS_SCHEDULE"
 RESULTS_TABLE = f"{SCHEMA}.FIFA_VEIKKAUS_RESULTS"
 PLAYOFF_RESULTS_TABLE = f"{SCHEMA}.FIFA_VEIKKAUS_PLAYOFF_RESULTS"
 
-# ── Groups + teams (mirror mock_session.py) ───────────────────────────────────
-GROUPS: dict[str, list[str]] = {
-    "A": ["Meksiko",     "Argentiina",  "Marokko",          "Australia"],
-    "B": ["Kanada",      "Espanja",     "Senegal",          "Japani"],
-    "C": ["Brasilia",    "Englanti",    "Kolumbia",         "Uzbekistan"],
-    "D": ["Yhdysvallat", "Ranska",      "Egypti",           "Iran"],
-    "E": ["Saksa",       "Norja",       "Tunisia",          "Etelä-Korea"],
-    "F": ["Portugali",   "Sveitsi",     "Algeria",          "Qatar"],
-    "G": ["Alankomaat",  "Belgia",      "Norsunluurannikko","Bolivia"],
-    "H": ["Kroatia",     "Itävalta",    "Ghana",            "Saudi-Arabia"],
-    "I": ["Skotlanti",   "Ruotsi",      "Etelä-Afrikka",    "Jordania"],
-    "J": ["Turkki",      "Tšekki",      "Kongon DT",        "Panama"],
-    "K": ["Bosnia",      "Uruguay",     "Kap Verde",        "Paraguay"],
-    "L": ["Ecuador",     "Irak",        "Haiti",            "Curaçao"],
-}
+# ── Groups + teams (loaded from data/schedule_2026.json) ─────────────────────
+from schedule_data import GROUPS, TEAMS, FLAGS as _FLAGS, GROUP_LETTERS as _GROUP_LETTERS
 
-_FLAGS = {
-    "Alankomaat": "🇳🇱", "Algeria": "🇩🇿", "Argentiina": "🇦🇷",
-    "Australia": "🇦🇺", "Belgia": "🇧🇪", "Bolivia": "🇧🇴",
-    "Bosnia": "🇧🇦", "Brasilia": "🇧🇷", "Curaçao": "🇨🇼",
-    "Ecuador": "🇪🇨", "Egypti": "🇪🇬", "Englanti": "🏴󠁧󠁢󠁥󠁮󠁧󠁿",
-    "Espanja": "🇪🇸", "Etelä-Afrikka": "🇿🇦", "Etelä-Korea": "🇰🇷",
-    "Ghana": "🇬🇭", "Haiti": "🇭🇹", "Iran": "🇮🇷",
-    "Irak": "🇮🇶", "Itävalta": "🇦🇹", "Japani": "🇯🇵",
-    "Jordania": "🇯🇴", "Kanada": "🇨🇦", "Kap Verde": "🇨🇻",
-    "Kolumbia": "🇨🇴", "Kongon DT": "🇨🇩", "Kroatia": "🇭🇷",
-    "Marokko": "🇲🇦", "Meksiko": "🇲🇽", "Norja": "🇳🇴",
-    "Norsunluurannikko": "🇨🇮", "Panama": "🇵🇦", "Paraguay": "🇵🇾",
-    "Portugali": "🇵🇹", "Qatar": "🇶🇦", "Ranska": "🇫🇷",
-    "Ruotsi": "🇸🇪", "Saksa": "🇩🇪", "Saudi-Arabia": "🇸🇦",
-    "Senegal": "🇸🇳", "Skotlanti": "🏴󠁧󠁢󠁳󠁣󠁴󠁿", "Sveitsi": "🇨🇭",
-    "Tšekki": "🇨🇿", "Tunisia": "🇹🇳", "Turkki": "🇹🇷",
-    "Uruguay": "🇺🇾", "Uzbekistan": "🇺🇿", "Yhdysvallat": "🇺🇸",
-}
-
-TEAMS = sorted({t for teams in GROUPS.values() for t in teams})
-
-_GROUP_LETTERS = sorted(GROUPS.keys())
 _GROUP_POS_COLS = (
     [f"GROUP_{L}_WINNER"   for L in _GROUP_LETTERS] +
     [f"GROUP_{L}_RUNNERUP" for L in _GROUP_LETTERS]

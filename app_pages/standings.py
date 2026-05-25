@@ -1,5 +1,3 @@
-import base64
-import os
 import streamlit as st
 import pandas as pd
 
@@ -11,26 +9,7 @@ RESULTS_TABLE = f"{SCHEMA}.FIFA_VEIKKAUS_RESULTS"
 PLAYOFF_PRED_TABLE = f"{SCHEMA}.FIFA_VEIKKAUS_PLAYOFF_PREDICTIONS"
 PLAYOFF_RESULTS_TABLE = f"{SCHEMA}.FIFA_VEIKKAUS_PLAYOFF_RESULTS"
 
-_FLAGS = {
-    "Alankomaat": "🇳🇱", "Algeria": "🇩🇿", "Argentiina": "🇦🇷",
-    "Australia": "🇦🇺", "Belgia": "🇧🇪", "Bolivia": "🇧🇴",
-    "Bosnia": "🇧🇦", "Brasilia": "🇧🇷", "Curaçao": "🇨🇼",
-    "Ecuador": "🇪🇨", "Egypti": "🇪🇬", "Englanti": "🏴󠁧󠁢󠁥󠁮󠁧󠁿",
-    "Espanja": "🇪🇸", "Etelä-Afrikka": "🇿🇦", "Etelä-Korea": "🇰🇷",
-    "Ghana": "🇬🇭", "Haiti": "🇭🇹", "Iran": "🇮🇷",
-    "Irak": "🇮🇶", "Itävalta": "🇦🇹", "Japani": "🇯🇵",
-    "Jordania": "🇯🇴", "Kanada": "🇨🇦", "Kap Verde": "🇨🇻",
-    "Kolumbia": "🇨🇴", "Kongon DT": "🇨🇩", "Kroatia": "🇭🇷",
-    "Marokko": "🇲🇦", "Meksiko": "🇲🇽", "Norja": "🇳🇴",
-    "Norsunluurannikko": "🇨🇮", "Panama": "🇵🇦", "Paraguay": "🇵🇾",
-    "Portugali": "🇵🇹", "Qatar": "🇶🇦", "Ranska": "🇫🇷",
-    "Ruotsi": "🇸🇪", "Saksa": "🇩🇪", "Saudi-Arabia": "🇸🇦",
-    "Senegal": "🇸🇳", "Skotlanti": "🏴󠁧󠁢󠁳󠁣󠁴󠁿", "Sveitsi": "🇨🇭",
-    "Tšekki": "🇨🇿", "Tunisia": "🇹🇳", "Turkki": "🇹🇷",
-    "Uruguay": "🇺🇾", "Uzbekistan": "🇺🇿", "Yhdysvallat": "🇺🇸",
-}
-
-_GROUP_LETTERS = list("ABCDEFGHIJKL")
+from schedule_data import FLAGS as _FLAGS, GROUP_LETTERS as _GROUP_LETTERS
 _GROUP_POS_COLS = (
     [f"GROUP_{L}_WINNER"   for L in _GROUP_LETTERS] +
     [f"GROUP_{L}_RUNNERUP" for L in _GROUP_LETTERS]
@@ -60,34 +39,8 @@ def email_to_display_name(email: str) -> str:
     return " ".join(p.capitalize() for p in parts)
 
 
-# ── Background image ──────────────────────────────────────────────────────────
-_img_path = os.path.join(os.path.dirname(__file__), "..", "assets", "maradona.gif")
-if os.path.exists(_img_path):
-    _b64 = base64.b64encode(open(_img_path, "rb").read()).decode()
-    st.markdown(
-        f"""
-        <style>
-        [data-testid="stAppViewContainer"] {{
-            background-image: url("data:image/gif;base64,{_b64}");
-            background-size: cover;
-            background-position: center;
-            background-attachment: fixed;
-        }}
-        [data-testid="stAppViewContainer"]::before {{
-            content: "";
-            position: fixed;
-            inset: 0;
-            background: rgba(20, 14, 8, 0.72);
-            pointer-events: none;
-            z-index: 0;
-        }}
-        div[data-baseweb="select"] span {{
-            color: #ffffff !important;
-        }}
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
+from app_pages._theme import apply_theme
+apply_theme()
 
 st.title("Tilanne")
 
@@ -106,6 +59,7 @@ def compute_player_points(player_email: str) -> pd.DataFrame:
     SELECT
         r.ID,
         r.MATCH,
+        p.MATCH_DAY,
         r.HOME_TEAM_GOALS AS RESULT_HOME,
         r.AWAY_TEAM_GOALS AS RESULT_AWAY,
         p.HOME_TEAM_GOALS AS PRED_HOME,
@@ -237,6 +191,7 @@ current_user = st.session_state.get("user_email", "")
 playoff_results = _load_playoff_results()
 
 leaderboard_rows = []
+_player_match_dfs: dict[str, pd.DataFrame] = {}
 for player_email in players:
     try:
         df = compute_player_points(player_email)
@@ -249,6 +204,7 @@ for player_email in players:
             "bracket_pts": bracket_pts,
             "points": group_pts + bracket_pts,
         })
+        _player_match_dfs[email_to_display_name(player_email)] = df
     except Exception:
         pass
 
@@ -281,93 +237,280 @@ if leaderboard_rows:
 else:
     st.info("Tuloksia ei vielä saatavilla.")
 
-# ── Ottelutiedot ──────────────────────────────────────────────────────────────
+# ── Pisteet ajan myötä ───────────────────────────────────────────────────────
+# Cumulative group-stage points per player over the tournament days. Bracket
+# points are tournament-end-only and not folded in here — the chart shows the
+# day-by-day momentum during group play.
+_day_frames = []
+for name, df in _player_match_dfs.items():
+    if df.empty or "MATCH_DAY" not in df.columns:
+        continue
+    by_day = (
+        df.dropna(subset=["POINTS"])
+          .groupby("MATCH_DAY", as_index=True)["POINTS"]
+          .sum()
+          .rename(name)
+    )
+    if not by_day.empty:
+        _day_frames.append(by_day)
+
+if _day_frames:
+    import altair as alt
+    points_wide = pd.concat(_day_frames, axis=1).sort_index().fillna(0).cumsum()
+    points_wide.index = pd.to_datetime(points_wide.index)
+    st.divider()
+    st.subheader("Pisteet ajan myötä")
+    st.caption(
+        "Kumulatiiviset alkulohkopisteet ottelupäivän mukaan. "
+        "Bracket-pisteet lisätään turnauksen päätteeksi."
+    )
+    chart_df = (
+        points_wide.reset_index()
+        .rename(columns={"index": "Päivä", "MATCH_DAY": "Päivä"})
+        .melt(id_vars="Päivä", var_name="Pelaaja", value_name="Pisteet")
+    )
+    # 90s-arcade palette — saturated neon over a transparent panel.
+    _PALETTE = ["#ff7e1c", "#5fc879", "#4a9eff", "#ffd95c", "#ff5cb8", "#a259ff", "#fff5d0"]
+    base = alt.Chart(chart_df).encode(
+        x=alt.X(
+            "Päivä:T",
+            title=None,
+            axis=alt.Axis(
+                format="%d.%m",
+                labelColor="#f5e8c8",
+                labelFontSize=12,
+                labelFont="VT323",
+                tickColor="#f5c842",
+                domainColor="#f5c842",
+                grid=False,
+            ),
+        ),
+        y=alt.Y(
+            "Pisteet:Q",
+            title=None,
+            axis=alt.Axis(
+                labelColor="#f5e8c8",
+                labelFontSize=12,
+                labelFont="VT323",
+                tickColor="#f5c842",
+                domainColor="#f5c842",
+                gridColor="rgba(245, 200, 80, 0.12)",
+                gridDash=[2, 4],
+            ),
+        ),
+        color=alt.Color(
+            "Pelaaja:N",
+            scale=alt.Scale(range=_PALETTE),
+            legend=alt.Legend(
+                orient="bottom",
+                labelColor="#f5e8c8",
+                labelFont="Bungee",
+                labelFontSize=11,
+                titleColor="#ffd95c",
+                title=None,
+                symbolType="square",
+                symbolSize=140,
+            ),
+        ),
+    )
+    chart = (
+        (base.mark_line(strokeWidth=3, interpolate="step-after")
+            + base.mark_point(size=70, filled=True, opacity=0.95))
+        .properties(height=340, background="transparent")
+        .configure_view(fill=None, stroke="#f5c842", strokeWidth=2)
+        .configure(background="transparent")
+    )
+    # Wrap the chart in a panel that matches the prediction-page scoreboard look.
+    st.markdown(
+        """
+        <style>
+        .stMainBlockContainer div[data-testid="stVegaLiteChart"] {
+            background: linear-gradient(180deg, rgba(10, 31, 18, 0.85), rgba(6, 19, 8, 0.85));
+            border: 2px solid #f5c842;
+            box-shadow: 4px 4px 0 #000, inset 0 0 0 1px rgba(0,0,0,0.7),
+                        inset 0 2px 0 rgba(255,230,180,0.18);
+            padding: 6px;
+            margin-bottom: 12px;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.altair_chart(chart, use_container_width=True)
+    st.caption(
+        "💡 Klikkaa kuvaajan oikeasta yläkulmasta laajenna-kuvaketta nähdäksesi "
+        "kuvaajan koko ruudulla — paremmin luettavissa kun pelaajia on paljon."
+    )
+
+# ── Pelaajan veikkaukset ─────────────────────────────────────────────────────
+# Single-player view — with 20+ users the all-columns table doesn't fit.
 st.divider()
-st.subheader("Ottelutiedot")
-st.caption("Valitse pelaaja nähdäksesi hänen veikkauksensa ottelukohtaisesti.")
+st.subheader("Pelaajan veikkaukset")
+st.caption("Valitse pelaaja nähdäksesi kaikki hänen ottelukohtaiset veikkauksensa. "
+           "Värikoodi: vihreä = 5 p (täysosuma), sininen = 3 p, keltainen = 1 p, punainen = 0 p.")
 
-player_display_names = [email_to_display_name(e) for e in players]
-email_by_display = dict(zip(player_display_names, players))
+_indexed_dfs = {
+    name: df.set_index("ID")
+    for name, df in _player_match_dfs.items()
+    if df is not None and not df.empty
+}
+if _indexed_dfs:
+    _all_names = sorted(_indexed_dfs.keys())
 
-default_idx = 0
-if current_user:
-    me_display = email_to_display_name(current_user)
-    if me_display in player_display_names:
-        default_idx = player_display_names.index(me_display)
+    # Default to the current user if present, otherwise the first player.
+    _me_display = email_to_display_name(current_user) if current_user else ""
+    _default_idx = _all_names.index(_me_display) if _me_display in _all_names else 0
 
-selected_display = st.selectbox(
-    "Pelaaja",
-    options=player_display_names,
-    index=default_idx,
-    label_visibility="collapsed",
-)
+    _selected = st.selectbox(
+        "Pelaaja",
+        options=_all_names,
+        index=_default_idx,
+        key="preds_filter",
+    )
+    _names = [_selected]
 
-if selected_display:
-    player_email = email_by_display[selected_display]
-    try:
-        detail_df = compute_player_points(player_email)
-    except Exception as e:
-        st.error(f"Tietojen lataus epäonnistui ({selected_display}): {e}")
-        detail_df = None
+    _base_name = _all_names[0]
+    _schedule_df = _indexed_dfs[_base_name].reset_index().sort_values(["MATCH_DAY", "ID"])
 
-    if detail_df is not None and len(detail_df) > 0:
-        sched_df = session.sql(
-            f"SELECT ID, MATCH_DAY FROM {SCHEMA}.FIFA_VEIKKAUS_SCHEDULE ORDER BY ID"
-        ).to_pandas()[["ID", "MATCH_DAY"]]
-        merged = detail_df.merge(sched_df, on="ID", how="left")
-        merged = merged.sort_values("ID")
+    st.markdown(
+        """
+        <style>
+        table.all-preds {
+            width: 100%;
+            border-collapse: collapse;
+            font-family: 'Roboto', Arial, sans-serif;
+            font-size: 0.82rem;
+            color: #f5e8c8;
+            background: rgba(6, 19, 8, 0.65);
+        }
+        table.all-preds th {
+            background: linear-gradient(180deg, #ffd95c, #b8862a);
+            color: #1a1408;
+            font-family: 'Bungee', 'Impact', sans-serif;
+            font-size: 0.72rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            padding: 7px 10px;
+            border: 1px solid #0a0a0a;
+            position: sticky;
+            top: 0;
+            text-align: left;
+        }
+        table.all-preds th.center { text-align: center; }
+        table.all-preds tbody tr.alt td { background-color: rgba(245, 200, 80, 0.04); }
+        table.all-preds tbody tr.day-start td {
+            border-top: 2px solid rgba(245, 200, 80, 0.55);
+        }
+        table.all-preds td {
+            padding: 6px 10px;
+            border-bottom: 1px solid rgba(245, 200, 80, 0.10);
+            vertical-align: middle;
+            font-variant-numeric: tabular-nums;
+        }
+        table.all-preds td.num {
+            color: #aa9466;
+            font-family: 'VT323', monospace;
+            font-size: 0.95rem;
+            text-align: right;
+            width: 36px;
+        }
+        table.all-preds td.day {
+            font-family: 'VT323', monospace;
+            color: #d4b878;
+            font-size: 1.0rem;
+            white-space: nowrap;
+            width: 200px;
+        }
+        table.all-preds td.day.empty-day { color: transparent; }
+        table.all-preds td.match { font-weight: 500; white-space: nowrap; min-width: 240px; }
+        table.all-preds td.result {
+            font-family: 'VT323', monospace;
+            font-size: 1.15rem;
+            color: #ff7e1c;
+            text-shadow: 0 0 4px #ff7e1c;
+            text-align: center;
+            background: #050505 !important;
+            min-width: 64px;
+            width: 64px;
+        }
+        table.all-preds td.result.pending { color: #553a18; text-shadow: none; }
+        table.all-preds td.pred {
+            text-align: center;
+            font-weight: 600;
+            min-width: 78px;
+        }
+        table.all-preds td.pred .pts {
+            display: inline-block;
+            font-size: 0.7rem;
+            opacity: 0.85;
+            margin-left: 4px;
+        }
+        table.all-preds td.p5 { background-color: rgba(40,160,80,0.55) !important; color: #fff; font-weight: 700; }
+        table.all-preds td.p3 { background-color: rgba(80,140,200,0.55) !important; color: #fff; }
+        table.all-preds td.p1 { background-color: rgba(200,160,40,0.55) !important; color: #1a1408; }
+        table.all-preds td.p0 { background-color: rgba(170,50,50,0.55) !important; color: #fff; }
+        table.all-preds td.empty { color: #5a4a30; text-align: center; }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
 
-        total_pts = int(merged["POINTS"].dropna().sum())
-        st.caption(f"**{selected_display}** – alkulohko **{total_pts}** pistettä.")
+    _html: list[str] = [
+        "<div style='overflow-x:auto;border:2px solid #f5c842;box-shadow:4px 4px 0 #000;'>",
+        "<table class='all-preds'><thead><tr>",
+        "<th>#</th><th>Pvm</th><th>Ottelu</th><th class='center'>Tulos</th>",
+    ]
+    for n in _names:
+        _html.append(f"<th class='center'>{n}</th>")
+    _html.append("</tr></thead><tbody>")
 
-        dates = sorted(merged["MATCH_DAY"].dropna().unique())
-        for d in dates:
-            day_rows = merged[merged["MATCH_DAY"] == d]
-            day_pts = int(day_rows["POINTS"].dropna().sum())
-            scored = int(day_rows["POINTS"].notna().sum())
-            total = len(day_rows)
-            date_label = _fi_date(d)
-            label = f"{date_label} — {scored}/{total} ottelua tuloksella · {day_pts} p"
-            with st.expander(label, expanded=False):
-                hdr1, hdr2, hdr3, hdr4 = st.columns([5, 2, 2, 1])
-                hdr2.caption("Veikkaus")
-                hdr3.caption("Tulos")
-                hdr4.caption("Pisteet")
-                for _, row in day_rows.iterrows():
-                    c1, c2, c3, c4 = st.columns([5, 2, 2, 1])
-                    c1.write(flagged(row["MATCH"]))
+    prev_day = None
+    for i, (_, row) in enumerate(_schedule_df.iterrows(), start=1):
+        mid = int(row["ID"])
+        day_changed = row["MATCH_DAY"] != prev_day
+        d_label = _fi_date(row["MATCH_DAY"]) if day_changed else ""
+        day_cls = "day" if day_changed else "day empty-day"
+        prev_day = row["MATCH_DAY"]
 
-                    ph, pa = row["PRED_HOME"], row["PRED_AWAY"]
-                    pred_str = (
-                        f"{int(ph)} – {int(pa)}"
-                        if not pd.isna(ph) and not pd.isna(pa)
-                        else "–"
-                    )
-                    c2.write(pred_str)
+        row_classes = []
+        if day_changed: row_classes.append("day-start")
+        if i % 2 == 0:  row_classes.append("alt")
+        row_cls = f" class='{' '.join(row_classes)}'" if row_classes else ""
 
-                    rh, ra = row["RESULT_HOME"], row["RESULT_AWAY"]
-                    if not pd.isna(rh) and not pd.isna(ra):
-                        c3.write(f"{int(rh)} – {int(ra)}")
-                    else:
-                        c3.write("—")
+        match_str = flagged(row["MATCH"])
+        rh, ra = row["RESULT_HOME"], row["RESULT_AWAY"]
+        if not pd.isna(rh) and not pd.isna(ra):
+            res_cell = f"<td class='result'>{int(rh)}–{int(ra)}</td>"
+        else:
+            res_cell = "<td class='result pending'>—</td>"
 
-                    pts = row["POINTS"]
-                    if pd.isna(pts):
-                        badge = "<span style='color:#aa9466;'>—</span>"
-                    else:
-                        pts_int = int(pts)
-                        if pts_int == 5:
-                            bg = "rgba(40,160,80,0.85)"; fg = "#f5e8c8"
-                        elif pts_int == 3:
-                            bg = "rgba(80,140,200,0.85)"; fg = "#f5e8c8"
-                        elif pts_int == 1:
-                            bg = "rgba(200,160,40,0.85)"; fg = "#1a1408"
-                        else:
-                            bg = "rgba(120,40,40,0.75)"; fg = "#f5e8c8"
-                        badge = (
-                            f"<span style='background:{bg};color:{fg};"
-                            f"padding:2px 8px;font-weight:700;'>{pts_int}</span>"
-                        )
-                    c4.markdown(badge, unsafe_allow_html=True)
-    elif detail_df is not None:
-        st.info("Pelaajalla ei ole vielä veikkauksia tuloksellisiin otteluihin.")
+        _html.append(
+            f"<tr{row_cls}>"
+            f"<td class='num'>{i}</td>"
+            f"<td class='{day_cls}'>{d_label or '·'}</td>"
+            f"<td class='match'>{match_str}</td>"
+            f"{res_cell}"
+        )
+        for n in _names:
+            df = _indexed_dfs[n]
+            if mid not in df.index:
+                _html.append("<td class='empty'>—</td>")
+                continue
+            prow = df.loc[mid]
+            ph, pa, pts = prow["PRED_HOME"], prow["PRED_AWAY"], prow["POINTS"]
+            if pd.isna(ph) or pd.isna(pa):
+                _html.append("<td class='empty'>—</td>")
+                continue
+            pred = f"{int(ph)}–{int(pa)}"
+            cls = ""
+            pts_html = ""
+            if not pd.isna(pts):
+                pts_int = int(pts)
+                cls = f"p{pts_int}"
+                pts_html = f"<span class='pts'>{pts_int}p</span>"
+            _html.append(f"<td class='pred {cls}'>{pred}{pts_html}</td>")
+        _html.append("</tr>")
+    _html.append("</tbody></table></div>")
+    st.markdown("".join(_html), unsafe_allow_html=True)
+else:
+    st.info("Veikkauksia ei vielä saatavilla.")
