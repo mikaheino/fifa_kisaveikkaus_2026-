@@ -94,7 +94,7 @@ When starting a new Streamlit-in-Snowflake project, clone whichever of these mat
 | Runtime | Template repository | Use when |
 |---|---|---|
 | **Container runtime** | https://github.com/mikaheino/fifa_kisaveikkaus_2026 | You need CCv2 custom components, full pip/PyPI dependency control, or thread-safe shared caching. This is the preferred default for new projects. |
-| **Warehouse runtime** | https://github.com/mikaheino/mm_kisaveikkaus | You need the legacy warehouse runtime — simpler infra (no compute pool, no EAI), conda-based deps via `environment.yml`, per-viewer instance model. Note: CCv2 components are stripped here. |
+| **Warehouse runtime** | https://github.com/mikaheino/mm_kisaveikkaus_2026 | You need the legacy warehouse runtime — simpler infra (no compute pool, no EAI), conda-based deps via `environment.yml`, per-viewer instance model. Note: CCv2 components are stripped here. |
 
 ### Required infrastructure (Snowflake objects)
 
