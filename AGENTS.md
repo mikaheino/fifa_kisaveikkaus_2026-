@@ -2,7 +2,7 @@
 
 Internal football prediction competition tied to the **2026 FIFA World Cup** (USA, Canada & Mexico, June 11 – July 19, 2026). Users predict scores for all 72 group stage games before the tournament starts; standings are computed as results come in. **Prediction deadline: June 11, 2026 at 19:00 Finnish time (EEST)** — after this, predictions are locked.
 
-Runs as a **Streamlit in Snowflake (SiS) container runtime** app on the `FIFA_VEIKKAUS_POOL` compute pool. Each viewer gets a personal Streamlit server instance. The app uses Snowpark for all database access; there is no external backend. The container runtime is required because the warehouse runtime strips `st.components.v2.component` (the four CCv2 pickers).
+Runs as a **Streamlit in Snowflake (SiS) app on the container runtime** (Snowflake Container Services) on the `FIFA_VEIKKAUS_POOL` compute pool. All viewers share a **single container instance** — unlike the warehouse runtime's per-viewer model — so `st.cache_data` / `st.cache_resource` are shared across sessions and code must be thread-safe. The app uses Snowpark for all database access; there is no external backend. The container runtime is required because the warehouse runtime strips `st.components.v2.component` (the four CCv2 pickers).
 
 ---
 
@@ -25,6 +25,10 @@ assets/                        # Loaded via base64 CSS injection — Snowflake C
                                #   at the top of every page
   maradona.gif                 #   Tournament-spirit background; rendered at 16% opacity as a ghosted
                                #   watermark behind the 90s-arcade theme on the predictions page
+  flags/                       #   48 country flags (SVG): Twemoji by default; flat flag-icons for
+                               #   equal-band flags (de/at). Loaded as base64 by _momentum_slider.py
+tools/
+  download_flags.py            # Re-fetches assets/flags/*.svg from emoji codepoints (Twemoji + flag-icons)
 data/                          # Canonical reference data — single source of truth, do not duplicate
   schedule_2026.json           #   48 teams (en+fi+flag), 12 groups, 16 venues, all 104 matches
                                #   (72 group + 32 knockout) with date/time/tz/venue
@@ -37,11 +41,11 @@ tests/
   __init__.py
 app_pages/
   __init__.py
-  my_predictions.py            # Group-stage trophy slider + playoff bracket picker
+  my_predictions.py            # Group-stage football score slider + playoff bracket picker
   standings.py                 # Leaderboard + points-over-time chart + all-players prediction table
   rules.py                     # Scoring rules and prize info
   admin_results.py             # Admin page: enter match results (restricted by email)
-  _momentum_slider.py          # CCv2 component: drag-the-trophy score picker
+  _momentum_slider.py          # CCv2 component: dual-thumb football score picker (flag-filled box ends)
   _bracket_picker.py           # CCv2 component: visual R32 → Champion bracket
   _group_picker.py             # CCv2 component: per-group winner + runner-up selector
   _team_grid_picker.py         # CCv2 component: click-to-pick chip grid (best thirds)
@@ -69,7 +73,7 @@ app_pages/
 
 | Layer | Technology |
 |---|---|
-| UI framework | Streamlit 1.51.0 (pinned in `pyproject.toml`) |
+| UI framework | Streamlit 1.57.0 (pinned in `pyproject.toml`) |
 | Runtime | Snowflake SiS **container runtime** (`SYSTEM$ST_CONTAINER_RUNTIME_PY3_11`), Python 3.11 |
 | Compute pool | `FIFA_VEIKKAUS_POOL` (CPU_X64_XS, 1 node) |
 | Database | Snowflake Snowpark (`snowflake-snowpark-python`) |
@@ -80,7 +84,7 @@ app_pages/
 
 ### Streamlit version pin
 
-Container runtime is more permissive than warehouse runtime — most pip-installable Streamlit versions work. The current pin is **1.51.0** (first release with stable `st.components.v2.component`). Always verify against the live doc before upgrading:
+Container runtime is more permissive than warehouse runtime — most pip-installable Streamlit versions work. The current pin is **1.57.0** (needs a recent release for stable `st.components.v2.component`). Always verify against the live doc before upgrading:
 https://docs.snowflake.com/en/developer-guide/streamlit/app-development/dependency-management
 
 ---
@@ -159,7 +163,7 @@ name = "my-app"
 version = "1.0.0"
 requires-python = ">=3.11"
 dependencies = [
-    "streamlit[snowflake]==1.51.0",
+    "streamlit[snowflake]==1.57.0",
     "pandas",
 ]
 ```
@@ -388,6 +392,9 @@ PUT file:///path/to/data/schedule_2026.json @FIFA_VEIKKAUS_STAGE/data/ AUTO_COMP
 PUT file:///path/to/assets/logo_2026.png @FIFA_VEIKKAUS_STAGE/assets/ AUTO_COMPRESS=FALSE OVERWRITE=TRUE;
 PUT file:///path/to/assets/maradona.gif  @FIFA_VEIKKAUS_STAGE/assets/ AUTO_COMPRESS=FALSE OVERWRITE=TRUE;
 PUT file:///path/to/assets/pirlo.gif     @FIFA_VEIKKAUS_STAGE/assets/ AUTO_COMPRESS=FALSE OVERWRITE=TRUE;
+
+-- Country flags (only when flags change; the slider loads these as base64)
+PUT file:///path/to/assets/flags/*.svg   @FIFA_VEIKKAUS_STAGE/assets/flags/ AUTO_COMPRESS=FALSE OVERWRITE=TRUE;
 
 -- Bundled fonts (Snowflake CSP blocks fonts.googleapis.com — woff2 is inlined as base64 in _theme.py)
 PUT file:///path/to/assets/fonts/Bungee.woff2       @FIFA_VEIKKAUS_STAGE/assets/fonts/ AUTO_COMPRESS=FALSE OVERWRITE=TRUE;
