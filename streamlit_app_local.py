@@ -269,9 +269,34 @@ if "user_email" not in st.session_state:
 
 _logo_b64 = base64.b64encode(open("assets/logo_2026.png", "rb").read()).decode()
 st.markdown(
-    f'<img src="data:image/png;base64,{_logo_b64}" '
-    f'style="width:100%;opacity:0.45;display:block;margin-bottom:0.5rem;" '
-    f'alt="FIFA 2026 -veikkaus" />',
+    f"""
+    <style>
+    .fifa-logo {{
+        display: block;
+        width: auto;
+        max-width: 220px;
+        max-height: 320px;
+        margin: 3rem auto 4.5rem auto;
+        opacity: 0.85;
+        animation: fifa-logo-glow 4s ease-in-out infinite;
+    }}
+    @keyframes fifa-logo-glow {{
+        0%, 100% {{
+            filter:
+                drop-shadow(0 0 6px rgba(255, 244, 194, 0.35))
+                drop-shadow(0 0 14px rgba(255, 220, 100, 0.30))
+                drop-shadow(0 0 24px rgba(255, 180, 30, 0.20));
+        }}
+        50% {{
+            filter:
+                drop-shadow(0 0 10px rgba(255, 244, 194, 0.55))
+                drop-shadow(0 0 22px rgba(255, 220, 100, 0.45))
+                drop-shadow(0 0 38px rgba(255, 180, 30, 0.30));
+        }}
+    }}
+    </style>
+    <img class="fifa-logo" src="data:image/png;base64,{_logo_b64}" alt="FIFA 2026 -veikkaus" />
+    """,
     unsafe_allow_html=True,
 )
 

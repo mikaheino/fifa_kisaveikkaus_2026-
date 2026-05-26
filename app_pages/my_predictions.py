@@ -206,6 +206,192 @@ playoff_existing = st.session_state._playoff_existing
 is_new = len(existing_preds) == 0
 playoff_new = len(playoff_existing) == 0
 
+all_match_ids: set[int] = set(schedule_df["ID"].astype(int).tolist())
+
+
+# ── Floating progress counter (top-right, persists on scroll) ────────────────
+# Counts reflect BOTH already-saved DB rows AND in-progress picks held in
+# session_state, so the panel shows the user's current intent before they hit
+# the save button. Updates on every full app rerun (save, Saksa/USA celebrate,
+# all-groups-complete celebrate, navigation).
+_group_total = 72
+
+
+def _count_group_filled() -> int:
+    n = 0
+    for gid in all_match_ids:
+        st_obj = st.session_state.get(f"mom_{gid}")
+        score = getattr(st_obj, "score", None) if st_obj is not None else None
+        if isinstance(score, dict) and "home" in score and "away" in score:
+            n += 1
+            continue
+        ep = existing_preds.get(gid, (None, None))
+        if ep[0] is not None:
+            n += 1
+    return n
+
+
+def _count_playoff_filled() -> int:
+    """Count slots filled. If a picker has live session_state (user has
+    interacted with it), trust only that — otherwise fall back to the cached
+    DB row. The CCv2 result object exposes its value via an attribute
+    (.pick / .selected / .picks)."""
+    n = 0
+    for letter in _GROUP_LETTERS:
+        grp_state = st.session_state.get(f"grp_{letter}")
+        grp_pick = getattr(grp_state, "pick", None) if grp_state is not None else None
+        if isinstance(grp_pick, dict):
+            w = grp_pick.get("winner")
+            r = grp_pick.get("runnerup")
+        else:
+            w = playoff_existing.get(f"GROUP_{letter}_WINNER")
+            r = playoff_existing.get(f"GROUP_{letter}_RUNNERUP")
+        if w and w != "—": n += 1
+        if r and r != "—": n += 1
+
+    third_state = st.session_state.get("grid_third")
+    third_live = getattr(third_state, "selected", None) if third_state is not None else None
+    if isinstance(third_live, list):
+        n += min(len([t for t in third_live if t]), 8)
+    else:
+        n += sum(1 for i in range(1, 9) if playoff_existing.get(f"THIRD_{i}"))
+
+    bracket_state = st.session_state.get("bracket_picker")
+    bracket_picks = getattr(bracket_state, "picks", None) if bracket_state is not None else None
+    for stage, count in (("r16", 16), ("qf", 8), ("sf", 4), ("finalists", 2)):
+        if isinstance(bracket_picks, dict) and stage in bracket_picks:
+            live = bracket_picks.get(stage)
+            if isinstance(live, list):
+                n += min(len([t for t in live if t]), count)
+        else:
+            prefix = "FINALIST" if stage == "finalists" else stage.upper()
+            n += sum(
+                1 for i in range(1, count + 1)
+                if playoff_existing.get(f"{prefix}_{i}")
+            )
+    if isinstance(bracket_picks, dict) and "champion" in bracket_picks:
+        champ = bracket_picks.get("champion")
+    else:
+        champ = playoff_existing.get("CHAMPION")
+    if champ and champ != "—":
+        n += 1
+
+    # Text input / selectbox: session_state holds the current widget value
+    # after first render (Streamlit pre-fills from `value=`/`index=`), so we
+    # trust it without falling back to DB.
+    scorer_state = st.session_state.get("ti_scorer")
+    scorer = (scorer_state if scorer_state is not None else playoff_existing.get("TOP_SCORER") or "")
+    if isinstance(scorer, str) and scorer.strip():
+        n += 1
+    dark_state = st.session_state.get("sel_darkhorse")
+    dark = dark_state if dark_state is not None else playoff_existing.get("DARK_HORSE")
+    if dark and dark != "—":
+        n += 1
+    return n
+
+
+_group_filled = _count_group_filled()
+_playoff_total = (
+    12 + 12 + 8 + 16 + 8 + 4 + 2 + 1 + 1 + 1
+)  # 65: winners, runners, thirds, R16, QF, SF, finalists, champion, scorer, dark horse
+_playoff_filled = min(_count_playoff_filled(), _playoff_total)
+
+_grp_pct = (_group_filled / _group_total) * 100 if _group_total else 0
+_po_pct = (_playoff_filled / _playoff_total) * 100 if _playoff_total else 0
+
+_grp_row_cls = "pred-counter-row done" if _group_filled >= _group_total else "pred-counter-row"
+_po_row_cls = "pred-counter-row done" if _playoff_filled >= _playoff_total else "pred-counter-row"
+
+_counter_html = f"""
+    <style>
+    .pred-counter {{
+        position: fixed;
+        top: 14px;
+        right: 18px;
+        z-index: 998;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        padding: 10px 14px;
+        min-width: 180px;
+        background: linear-gradient(180deg, rgba(45, 30, 8, 0.95), rgba(25, 17, 5, 0.95));
+        font-family: 'Press Start 2P', 'Courier New', monospace;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        box-shadow:
+            inset 0 0 0 1px rgba(212, 160, 23, 0.55),
+            inset -2px -2px 0 0 rgba(0, 0, 0, 0.75),
+            inset 2px 2px 0 0 rgba(245, 200, 66, 0.30),
+            0 0 10px rgba(212, 160, 23, 0.30);
+    }}
+    .pred-counter-title {{
+        font-size: 0.55rem;
+        color: #d4a017;
+        text-align: center;
+        margin-bottom: 2px;
+        text-shadow: 0 0 4px rgba(212, 160, 23, 0.50);
+    }}
+    .pred-counter-row {{
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 8px;
+        font-size: 0.55rem;
+        color: #f5c842;
+        text-shadow:
+            0 0 4px rgba(245, 200, 66, 0.65),
+            0 0 8px rgba(212, 160, 23, 0.40);
+    }}
+    .pred-counter-row.done {{
+        color: #c8ff70;
+        text-shadow:
+            0 0 4px rgba(200, 255, 112, 0.75),
+            0 0 8px rgba(160, 220, 60, 0.45);
+    }}
+    .pred-counter-row .pred-counter-count {{
+        font-size: 0.60rem;
+        white-space: nowrap;
+    }}
+    .pred-counter-bar {{
+        height: 4px;
+        width: 100%;
+        background: rgba(0, 0, 0, 0.65);
+        box-shadow: inset 0 0 0 1px rgba(212, 160, 23, 0.45);
+        margin-top: 2px;
+    }}
+    .pred-counter-bar-fill {{
+        height: 100%;
+        background: linear-gradient(90deg, #d4a017, #f5c842, #ffe082);
+        box-shadow: 0 0 6px rgba(245, 200, 66, 0.65);
+    }}
+    @media (max-width: 640px) {{
+        .pred-counter {{
+            top: 8px;
+            right: 8px;
+            min-width: 140px;
+            padding: 7px 9px;
+        }}
+        .pred-counter-title,
+        .pred-counter-row,
+        .pred-counter-row .pred-counter-count {{
+            font-size: 0.48rem !important;
+        }}
+    }}
+    </style>
+    <div class="pred-counter">
+      <div class="pred-counter-title">Veikkaukset</div>
+      <div class="{_grp_row_cls}">
+        <span>Ottelut</span><span class="pred-counter-count">{_group_filled} / {_group_total}</span>
+      </div>
+      <div class="pred-counter-bar"><div class="pred-counter-bar-fill" style="width: {_grp_pct:.1f}%;"></div></div>
+      <div class="{_po_row_cls}">
+        <span>Bracket</span><span class="pred-counter-count">{_playoff_filled} / {_playoff_total}</span>
+      </div>
+      <div class="pred-counter-bar"><div class="pred-counter-bar-fill" style="width: {_po_pct:.1f}%;"></div></div>
+    </div>
+"""
+st.markdown(_counter_html, unsafe_allow_html=True)
+
 
 # ── Incomplete warning ────────────────────────────────────────────────────────
 _unfilled_ids = [
@@ -224,7 +410,6 @@ st.caption(
 )
 
 dates = sorted(schedule_df["MATCH_DAY"].unique())
-all_match_ids: set[int] = set(schedule_df["ID"].astype(int).tolist())
 
 st.caption(
     "Vedä pokaalia oikealle (koti voittaa) tai vasemmalle (vieras voittaa). "
@@ -246,6 +431,13 @@ def _render_match_slider(gid: int, match: str, default: tuple | None) -> None:
     # After the user commits a score, check whether they just crossed a
     # 5-pick milestone — fires a full-app rerun that paints the overlay.
     maybe_celebrate()
+    # Trigger a full app rerun only when the filled count actually changes,
+    # so the top-right counter refreshes on real picks without re-running the
+    # whole page on every micro-interaction.
+    _cur = _count_group_filled()
+    if _cur != st.session_state.get("_seen_group_filled", -1):
+        st.session_state["_seen_group_filled"] = _cur
+        st.rerun(scope="app")
 
 
 # Flat list — all 72 matches visible at once, grouped only by a date header.
@@ -525,13 +717,22 @@ def _render_playoff_section() -> None:
             session.sql(
                 f"INSERT INTO {PLAYOFF_TABLE} ({col_list}) VALUES ({val_list})"
             ).collect()
-            # Refresh per-user cache so the next fragment rerun sees fresh data.
+            # Refresh per-user cache and force a full-app rerun so the floating
+            # counter (rendered at script top) reflects the new playoff total.
             st.session_state._playoff_existing = _load_playoff_existing(user_email)
             st.success(f"Pudotuspeliveikkaukset tallennettu – **{display_name}**!")
             trigger_submit_celebrate()
-            st.rerun()
+            st.rerun(scope="app")
         except Exception as e:
             st.error(f"Virhe pudotuspeliveikkausten tallennuksessa: {e}")
+
+    # Same delta-trigger as the slider fragment: fire a full app rerun only when
+    # the playoff count actually changes (a new pick was committed), so the
+    # top-right counter stays in sync.
+    _cur_po = _count_playoff_filled()
+    if _cur_po != st.session_state.get("_seen_playoff_filled", -1):
+        st.session_state["_seen_playoff_filled"] = _cur_po
+        st.rerun(scope="app")
 
 
 _render_playoff_section()
