@@ -295,7 +295,7 @@ _page_modules = {
     "Admin: Tulokset":  "app_pages.admin_results",
 }
 
-selected = st.radio("", _page_titles, horizontal=True, label_visibility="collapsed")
+selected = st.radio("Navigation", _page_titles, horizontal=True, label_visibility="collapsed")
 
 _mod = _page_modules[selected]
 if _mod in sys.modules:

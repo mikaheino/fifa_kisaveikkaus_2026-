@@ -144,41 +144,66 @@ if is_locked:
     st.warning("Veikkaukset on lukittu – turnaus on alkanut. Ennustuksia ei voi enää muokata.")
     st.stop()
 
-# ── Load schedule ─────────────────────────────────────────────────────────────
-schedule_df = session.sql(
-    f"SELECT ID, MATCH_DAY, MATCH FROM {SCHEMA}.FIFA_VEIKKAUS_SCHEDULE ORDER BY ID"
-).to_pandas()
+# ── Snowflake loads (cached so picker clicks don't re-query the warehouse) ───
+# The schedule is global + immutable during the tournament, so cache shared
+# across all viewers. The per-user predictions live in st.session_state and
+# are invalidated explicitly after a successful save.
+@st.cache_data(ttl=3600, show_spinner=False)
+def _load_schedule(_session) -> pd.DataFrame:
+    return _session.sql(
+        f"SELECT ID, MATCH_DAY, MATCH FROM {SCHEMA}.FIFA_VEIKKAUS_SCHEDULE ORDER BY ID"
+    ).to_pandas()
 
-# ── Load existing group-stage predictions ─────────────────────────────────────
-existing_preds: dict[int, tuple] = {}
-for _, row in session.sql(
-    f"SELECT ID, HOME_TEAM_GOALS, AWAY_TEAM_GOALS FROM {PREDICTIONS_TABLE} "
-    f"WHERE USER_EMAIL = '{user_email}' ORDER BY ID"
-).to_pandas().iterrows():
-    h, a = row["HOME_TEAM_GOALS"], row["AWAY_TEAM_GOALS"]
-    existing_preds[int(row["ID"])] = (
-        None if pd.isna(h) else h,
-        None if pd.isna(a) else a,
-    )
+
+def _load_existing_preds(user_email: str) -> dict[int, tuple]:
+    out: dict[int, tuple] = {}
+    for _, row in session.sql(
+        f"SELECT ID, HOME_TEAM_GOALS, AWAY_TEAM_GOALS FROM {PREDICTIONS_TABLE} "
+        f"WHERE USER_EMAIL = '{user_email}' ORDER BY ID"
+    ).to_pandas().iterrows():
+        h, a = row["HOME_TEAM_GOALS"], row["AWAY_TEAM_GOALS"]
+        out[int(row["ID"])] = (
+            None if pd.isna(h) else h,
+            None if pd.isna(a) else a,
+        )
+    return out
+
+
+def _load_playoff_existing(user_email: str) -> dict:
+    out: dict = {}
+    try:
+        pp_df = session.sql(
+            f"SELECT * FROM {PLAYOFF_TABLE} WHERE USER_EMAIL = '{user_email}'"
+        ).to_pandas()
+        if len(pp_df) > 0:
+            for k in _PLAYOFF_COLS:
+                if k not in pp_df.columns:
+                    continue
+                v = pp_df.iloc[0][k]
+                if v is not None and not (isinstance(v, float) and pd.isna(v)) and v != "":
+                    out[k] = v
+    except Exception:
+        pass
+    return out
+
+
+schedule_df = _load_schedule(session)
+
+# Per-user caches keyed by email — flushed on user switch or after a save.
+if st.session_state.get("_preds_cache_user") != user_email:
+    st.session_state.pop("_existing_preds", None)
+    st.session_state.pop("_playoff_existing", None)
+    st.session_state._preds_cache_user = user_email
+
+if "_existing_preds" not in st.session_state:
+    st.session_state._existing_preds = _load_existing_preds(user_email)
+existing_preds = st.session_state._existing_preds
+
+if "_playoff_existing" not in st.session_state:
+    st.session_state._playoff_existing = _load_playoff_existing(user_email)
+playoff_existing = st.session_state._playoff_existing
 
 is_new = len(existing_preds) == 0
-
-# ── Load existing playoff predictions ────────────────────────────────────────
-playoff_existing: dict = {}
-try:
-    pp_df = session.sql(
-        f"SELECT * FROM {PLAYOFF_TABLE} WHERE USER_EMAIL = '{user_email}'"
-    ).to_pandas()
-    if len(pp_df) > 0:
-        for k in _PLAYOFF_COLS:
-            if k not in pp_df.columns:
-                continue
-            v = pp_df.iloc[0][k]
-            if v is not None and not (isinstance(v, float) and pd.isna(v)) and v != "":
-                playoff_existing[k] = v
-except Exception:
-    pass
-
 playoff_new = len(playoff_existing) == 0
 
 
@@ -299,6 +324,7 @@ if submit:
             f"(USER_EMAIL, ID, MATCH_DAY, MATCH, HOME_TEAM_GOALS, AWAY_TEAM_GOALS, INSERTED) "
             f"VALUES {', '.join(values_parts)}"
         ).collect()
+        st.session_state.pop("_existing_preds", None)
         if skipped:
             st.warning(
                 f"Tallennettu, mutta {len(skipped)} ottelulla ei ennustetta: "
@@ -310,197 +336,202 @@ if submit:
     except Exception as e:
         st.error(f"Virhe tallennuksessa: {e}")
 
-# ── Playoff bracket section ───────────────────────────────────────────────────
+# ── Playoff bracket section (wrapped in a fragment so picker clicks rerun
+#    only this block, not the 72 match sliders above) ──────────────────────
 st.divider()
-st.subheader("Pudotuspelibracket")
-st.caption(
-    "Veikkaa koko pudotuspelibracket etukäteen: lohkovoittajat ja kakkoset, "
-    "parhaat kolmoset, R16-jatkajat ja edelleen aina mestariin asti. "
-    "Lisäksi turnauksen maalikuningas ja oma musta hevosesi."
-)
 
 
-def _sel_default(key: str, options: list[str]) -> int:
-    v = playoff_existing.get(key)
-    if v in options:
-        return options.index(v)
-    return 0
+@st.fragment
+def _render_playoff_section() -> None:
+    # Re-read each rerun so the fragment sees fresh data after a save.
+    playoff_existing = st.session_state.get("_playoff_existing") or {}
+    playoff_new = len(playoff_existing) == 0
 
+    def _sel_default(key: str, options: list[str]) -> int:
+        v = playoff_existing.get(key)
+        if v in options:
+            return options.index(v)
+        return 0
 
-def _ms_defaults(prefix: str, count: int) -> list[str]:
-    out = []
-    for i in range(1, count + 1):
-        v = playoff_existing.get(f"{prefix}_{i}")
-        if v and isinstance(v, str) and v in TEAMS:
-            out.append(v)
-    return out
+    def _ms_defaults(prefix: str, count: int) -> list[str]:
+        out = []
+        for i in range(1, count + 1):
+            v = playoff_existing.get(f"{prefix}_{i}")
+            if v and isinstance(v, str) and v in TEAMS:
+                out.append(v)
+        return out
 
+    def _str_default(key: str) -> str:
+        v = playoff_existing.get(key, "")
+        return v if isinstance(v, str) else ""
 
-def _str_default(key: str) -> str:
-    v = playoff_existing.get(key, "")
-    return v if isinstance(v, str) else ""
+    st.subheader("Pudotuspelibracket")
+    st.caption(
+        "Veikkaa koko pudotuspelibracket etukäteen: lohkovoittajat ja kakkoset, "
+        "parhaat kolmoset, R16-jatkajat ja edelleen aina mestariin asti. "
+        "Lisäksi turnauksen maalikuningas ja oma musta hevosesi."
+    )
 
+    # ── Lohkovoittajat ja kakkoset (per group) ──────────────────────────────
+    st.markdown("**Lohkovoittajat ja kakkoset**")
+    st.caption("Valitse kullekin lohkolle voittaja ja kakkonen (3 p + 3 p / lohko).")
 
-# ── Lohkovoittajat ja kakkoset (per group) ──────────────────────────────────
-st.markdown("**Lohkovoittajat ja kakkoset**")
-st.caption("Valitse kullekin lohkolle voittaja ja kakkonen (3 p + 3 p / lohko).")
+    group_picks: dict[str, tuple[str, str]] = {}
+    for letter in _GROUP_LETTERS:
+        teams = GROUPS[letter]
+        w_key = f"GROUP_{letter}_WINNER"
+        r_key = f"GROUP_{letter}_RUNNERUP"
+        flag_teams = [with_flag(t) for t in teams]
+        expander_title = f"Lohko {letter}: {', '.join(flag_teams)}"
+        with st.expander(expander_title, expanded=True):
+            pick = group_picker(
+                teams=teams,
+                team_labels={t: with_flag(t) for t in teams},
+                winner=playoff_existing.get(w_key) if playoff_existing.get(w_key) in teams else None,
+                runnerup=playoff_existing.get(r_key) if playoff_existing.get(r_key) in teams else None,
+                key=f"grp_{letter}",
+            )
+            w = pick["winner"] or "—"
+            r = pick["runnerup"] or "—"
+            group_picks[letter] = (w, r)
 
-group_picks: dict[str, tuple[str, str]] = {}
-for letter in _GROUP_LETTERS:
-    teams = GROUPS[letter]
-    w_key = f"GROUP_{letter}_WINNER"
-    r_key = f"GROUP_{letter}_RUNNERUP"
-    flag_teams = [with_flag(t) for t in teams]
-    expander_title = f"Lohko {letter}: {', '.join(flag_teams)}"
-    with st.expander(expander_title, expanded=True):
-        pick = group_picker(
-            teams=teams,
-            team_labels={t: with_flag(t) for t in teams},
-            winner=playoff_existing.get(w_key) if playoff_existing.get(w_key) in teams else None,
-            runnerup=playoff_existing.get(r_key) if playoff_existing.get(r_key) in teams else None,
-            key=f"grp_{letter}",
-        )
-        w = pick["winner"] or "—"
-        r = pick["runnerup"] or "—"
-        group_picks[letter] = (w, r)
+    maybe_celebrate_groups_complete(group_picks)
 
-maybe_celebrate_groups_complete(group_picks)
+    # ── Parhaat kolmoset (8 best third-placed) ──────────────────────────────
+    st.markdown("**Parhaat kolmoset – valitse 8 joukkuetta**")
+    st.caption("8 lohkokolmosta etenee R32-vaiheeseen (1 p / kpl).")
 
-# ── Parhaat kolmoset (8 best third-placed) ──────────────────────────────────
-st.markdown("**Parhaat kolmoset – valitse 8 joukkuetta**")
-st.caption("8 lohkokolmosta etenee R32-vaiheeseen (1 p / kpl).")
+    _picked_w_r = {
+        t for (w, r) in group_picks.values() for t in (w, r) if t and t != "—"
+    }
+    _third_options = [t for t in TEAMS if t not in _picked_w_r]
 
-# Best-third candidates exclude any team already picked as a group winner
-# or runner-up — a team can only qualify in one slot.
-_picked_w_r = {
-    t for (w, r) in group_picks.values() for t in (w, r) if t and t != "—"
-}
-_third_options = [t for t in TEAMS if t not in _picked_w_r]
+    third_teams = team_grid_picker(
+        teams=_third_options,
+        selected=_ms_defaults("THIRD", 8),
+        team_labels={t: with_flag(t) for t in _third_options},
+        max_selected=8,
+        key="grid_third",
+    )
 
-third_teams = team_grid_picker(
-    teams=_third_options,
-    selected=_ms_defaults("THIRD", 8),
-    team_labels={t: with_flag(t) for t in _third_options},
-    max_selected=8,
-    key="grid_third",
-)
+    # ── R32 → Champion: visual bracket ──────────────────────────────────────
+    st.markdown("**Bracket: R16 → Mestari**")
+    st.caption(
+        "Klikkaa joukkuetta nostaaksesi sen seuraavaan vaiheeseen. "
+        "Klikkaa uudelleen pudottaaksesi sen pois jatkosta."
+    )
 
-# ── R32 → Champion: visual bracket ──────────────────────────────────────────
-st.markdown("**Bracket: R16 → Mestari**")
-st.caption(
-    "Klikkaa joukkuetta nostaaksesi sen seuraavaan vaiheeseen. "
-    "Klikkaa uudelleen pudottaaksesi sen pois jatkosta."
-)
-
-# Build the R32 pool from current group + best-thirds picks. Order preserved
-# to keep the bracket's chip order stable across reruns.
-_r32_pool: list[str] = []
-_seen: set[str] = set()
-for letter in _GROUP_LETTERS:
-    w, r = group_picks[letter]
-    for team in (w, r):
-        if team and team != "—" and team not in _seen:
+    _r32_pool: list[str] = []
+    _seen: set[str] = set()
+    for letter in _GROUP_LETTERS:
+        w, r = group_picks[letter]
+        for team in (w, r):
+            if team and team != "—" and team not in _seen:
+                _r32_pool.append(team)
+                _seen.add(team)
+    for team in third_teams:
+        if team and team not in _seen:
             _r32_pool.append(team)
             _seen.add(team)
-for team in third_teams:
-    if team and team not in _seen:
-        _r32_pool.append(team)
-        _seen.add(team)
 
-_n_winners = sum(1 for (w, _) in group_picks.values() if w and w != "—")
-_n_runners = sum(1 for (_, r) in group_picks.values() if r and r != "—")
-_n_thirds  = len(third_teams)
-_pool_total = len(_r32_pool)
+    _n_winners = sum(1 for (w, _) in group_picks.values() if w and w != "—")
+    _n_runners = sum(1 for (_, r) in group_picks.values() if r and r != "—")
+    _n_thirds  = len(third_teams)
+    _pool_total = len(_r32_pool)
 
-if _pool_total >= 32:
-    bracket_picks = bracket_picker(
-        teams_r32=_r32_pool,
-        team_labels={t: with_flag(t) for t in _r32_pool},
-        initial_picks={
-            "r16": _ms_defaults("R16", 16),
-            "qf": _ms_defaults("QF", 8),
-            "sf": _ms_defaults("SF", 4),
-            "finalists": _ms_defaults("FINALIST", 2),
-            "champion": _str_default("CHAMPION") or None,
-        },
-        key="bracket_picker",
+    if _pool_total >= 32:
+        bracket_picks = bracket_picker(
+            teams_r32=_r32_pool,
+            team_labels={t: with_flag(t) for t in _r32_pool},
+            initial_picks={
+                "r16": _ms_defaults("R16", 16),
+                "qf": _ms_defaults("QF", 8),
+                "sf": _ms_defaults("SF", 4),
+                "finalists": _ms_defaults("FINALIST", 2),
+                "champion": _str_default("CHAMPION") or None,
+            },
+            key="bracket_picker",
+        )
+    else:
+        _missing_parts = []
+        if _n_winners < 12: _missing_parts.append(f"lohkovoittajat **{_n_winners}/12**")
+        if _n_runners < 12: _missing_parts.append(f"kakkoset **{_n_runners}/12**")
+        if _n_thirds  < 8:  _missing_parts.append(f"parhaat kolmoset **{_n_thirds}/8**")
+        st.info(
+            f"R32-pooli **{_pool_total} / 32** — bracket aukeaa, kun kaikki 32 joukkuetta on valittu.\n\n"
+            f"Vielä puuttuu: {', '.join(_missing_parts) if _missing_parts else 'ei mitään 🎉'}."
+        )
+        bracket_picks = {"r16": [], "qf": [], "sf": [], "finalists": [], "champion": None}
+
+    # ── Erikoisveikkaukset ──────────────────────────────────────────────────
+    st.markdown("**Erikoisveikkaukset**")
+    col_e1, col_e2 = st.columns(2)
+    top_scorer = col_e1.text_input(
+        "Maalikuningas (pelaajan nimi)",
+        value=_str_default("TOP_SCORER"),
+        key="ti_scorer",
+        help="15 p oikeasta turnauksen maalikuninkaasta.",
     )
-else:
-    _missing_parts = []
-    if _n_winners < 12: _missing_parts.append(f"lohkovoittajat **{_n_winners}/12**")
-    if _n_runners < 12: _missing_parts.append(f"kakkoset **{_n_runners}/12**")
-    if _n_thirds  < 8:  _missing_parts.append(f"parhaat kolmoset **{_n_thirds}/8**")
-    st.info(
-        f"R32-pooli **{_pool_total} / 32** — bracket aukeaa, kun kaikki 32 joukkuetta on valittu.\n\n"
-        f"Vielä puuttuu: {', '.join(_missing_parts) if _missing_parts else 'ei mitään 🎉'}."
+    dark_opts = ["—"] + TEAMS
+    dark_horse = col_e2.selectbox(
+        "Musta hevonen (etenee puolivälieriin)",
+        options=dark_opts,
+        index=_sel_default("DARK_HORSE", dark_opts),
+        format_func=_flag_label,
+        key="sel_darkhorse",
+        help="15 p jos valitsemasi joukkue selviää puolivälieriin asti.",
     )
-    bracket_picks = {"r16": [], "qf": [], "sf": [], "finalists": [], "champion": None}
 
-# ── Erikoisveikkaukset ──────────────────────────────────────────────────────
-st.markdown("**Erikoisveikkaukset**")
-col_e1, col_e2 = st.columns(2)
-top_scorer = col_e1.text_input(
-    "Maalikuningas (pelaajan nimi)",
-    value=_str_default("TOP_SCORER"),
-    key="ti_scorer",
-    help="15 p oikeasta turnauksen maalikuninkaasta.",
-)
-dark_opts = ["—"] + TEAMS
-dark_horse = col_e2.selectbox(
-    "Musta hevonen (etenee puolivälieriin)",
-    options=dark_opts,
-    index=_sel_default("DARK_HORSE", dark_opts),
-    format_func=_flag_label,
-    key="sel_darkhorse",
-    help="15 p jos valitsemasi joukkue selviää puolivälieriin asti.",
-)
+    _po_label = "Tallenna pudotuspeliveikkaukset" if playoff_new else "Päivitä pudotuspeliveikkaukset"
+    playoff_submit = st.button(_po_label, type="primary", use_container_width=True, key="btn_po_submit")
 
-_po_label = "Tallenna pudotuspeliveikkaukset" if playoff_new else "Päivitä pudotuspeliveikkaukset"
-playoff_submit = st.button(_po_label, type="primary", use_container_width=True, key="btn_po_submit")
+    if playoff_submit:
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-# ── Handle playoff submission ─────────────────────────────────────────────────
-if playoff_submit:
-    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        def _s(v) -> str:
+            if not v or v == "—":
+                return "NULL"
+            return "'" + str(v).replace("'", "''") + "'"
 
-    def _s(v) -> str:
-        if not v or v == "—":
-            return "NULL"
-        return "'" + str(v).replace("'", "''") + "'"
+        third_v = (list(third_teams)             + [None] * 8)[:8]
+        r16_v   = (list(bracket_picks["r16"])    + [None] * 16)[:16]
+        qf_v    = (list(bracket_picks["qf"])     + [None] * 8)[:8]
+        sf_v    = (list(bracket_picks["sf"])     + [None] * 4)[:4]
+        fi_v    = (list(bracket_picks["finalists"]) + [None] * 2)[:2]
+        champion = bracket_picks["champion"]
 
-    third_v = (list(third_teams)             + [None] * 8)[:8]
-    r16_v   = (list(bracket_picks["r16"])    + [None] * 16)[:16]
-    qf_v    = (list(bracket_picks["qf"])     + [None] * 8)[:8]
-    sf_v    = (list(bracket_picks["sf"])     + [None] * 4)[:4]
-    fi_v    = (list(bracket_picks["finalists"]) + [None] * 2)[:2]
-    champion = bracket_picks["champion"]
+        values: list[str] = [f"'{user_email}'"]
+        for letter in _GROUP_LETTERS:
+            values.append(_s(group_picks[letter][0]))
+        for letter in _GROUP_LETTERS:
+            values.append(_s(group_picks[letter][1]))
+        for v in third_v: values.append(_s(v))
+        for v in r16_v:   values.append(_s(v))
+        for v in qf_v:    values.append(_s(v))
+        for v in sf_v:    values.append(_s(v))
+        for v in fi_v:    values.append(_s(v))
+        values.append(_s(champion))
+        values.append(_s(top_scorer.strip() if top_scorer else None))
+        values.append(_s(dark_horse))
+        values.append(f"'{now_str}'")
 
-    values: list[str] = [f"'{user_email}'"]
-    for letter in _GROUP_LETTERS:
-        values.append(_s(group_picks[letter][0]))
-    for letter in _GROUP_LETTERS:
-        values.append(_s(group_picks[letter][1]))
-    for v in third_v: values.append(_s(v))
-    for v in r16_v:   values.append(_s(v))
-    for v in qf_v:    values.append(_s(v))
-    for v in sf_v:    values.append(_s(v))
-    for v in fi_v:    values.append(_s(v))
-    values.append(_s(champion))
-    values.append(_s(top_scorer.strip() if top_scorer else None))
-    values.append(_s(dark_horse))
-    values.append(f"'{now_str}'")
+        col_list = "USER_EMAIL, " + ", ".join(_PLAYOFF_COLS) + ", INSERTED"
+        val_list = ", ".join(values)
 
-    col_list = "USER_EMAIL, " + ", ".join(_PLAYOFF_COLS) + ", INSERTED"
-    val_list = ", ".join(values)
+        try:
+            session.sql(
+                f"DELETE FROM {PLAYOFF_TABLE} WHERE USER_EMAIL = '{user_email}'"
+            ).collect()
+            session.sql(
+                f"INSERT INTO {PLAYOFF_TABLE} ({col_list}) VALUES ({val_list})"
+            ).collect()
+            # Refresh per-user cache so the next fragment rerun sees fresh data.
+            st.session_state._playoff_existing = _load_playoff_existing(user_email)
+            st.success(f"Pudotuspeliveikkaukset tallennettu – **{display_name}**!")
+            trigger_submit_celebrate()
+            st.rerun()
+        except Exception as e:
+            st.error(f"Virhe pudotuspeliveikkausten tallennuksessa: {e}")
 
-    try:
-        session.sql(
-            f"DELETE FROM {PLAYOFF_TABLE} WHERE USER_EMAIL = '{user_email}'"
-        ).collect()
-        session.sql(
-            f"INSERT INTO {PLAYOFF_TABLE} ({col_list}) VALUES ({val_list})"
-        ).collect()
-        st.success(f"Pudotuspeliveikkaukset tallennettu – **{display_name}**!")
-        trigger_submit_celebrate()
-        st.rerun()
-    except Exception as e:
-        st.error(f"Virhe pudotuspeliveikkausten tallennuksessa: {e}")
+
+_render_playoff_section()
