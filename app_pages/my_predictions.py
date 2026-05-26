@@ -296,11 +296,10 @@ _playoff_total = (
 )  # 65: winners, runners, thirds, R16, QF, SF, finalists, champion, scorer, dark horse
 _playoff_filled = min(_count_playoff_filled(), _playoff_total)
 
-_grp_pct = (_group_filled / _group_total) * 100 if _group_total else 0
-_po_pct = (_playoff_filled / _playoff_total) * 100 if _playoff_total else 0
-
-_grp_row_cls = "pred-counter-row done" if _group_filled >= _group_total else "pred-counter-row"
-_po_row_cls = "pred-counter-row done" if _playoff_filled >= _playoff_total else "pred-counter-row"
+_total_filled = _group_filled + _playoff_filled
+_total_target = _group_total + _playoff_total
+_total_pct = (_total_filled / _total_target) * 100 if _total_target else 0
+_row_cls = "pred-counter-row done" if _total_filled >= _total_target else "pred-counter-row"
 
 _counter_html = f"""
     <style>
@@ -313,7 +312,7 @@ _counter_html = f"""
         flex-direction: column;
         gap: 6px;
         padding: 10px 14px;
-        min-width: 180px;
+        min-width: 200px;
         background: linear-gradient(180deg, rgba(45, 30, 8, 0.95), rgba(25, 17, 5, 0.95));
         font-family: 'Press Start 2P', 'Courier New', monospace;
         text-transform: uppercase;
@@ -368,7 +367,7 @@ _counter_html = f"""
         .pred-counter {{
             top: 8px;
             right: 8px;
-            min-width: 140px;
+            min-width: 160px;
             padding: 7px 9px;
         }}
         .pred-counter-title,
@@ -379,15 +378,11 @@ _counter_html = f"""
     }}
     </style>
     <div class="pred-counter">
-      <div class="pred-counter-title">Veikkaukset</div>
-      <div class="{_grp_row_cls}">
-        <span>Ottelut</span><span class="pred-counter-count">{_group_filled} / {_group_total}</span>
+      <div class="pred-counter-title">Challenge status</div>
+      <div class="{_row_cls}">
+        <span>Veikkaukset</span><span class="pred-counter-count">{_total_filled} / {_total_target}</span>
       </div>
-      <div class="pred-counter-bar"><div class="pred-counter-bar-fill" style="width: {_grp_pct:.1f}%;"></div></div>
-      <div class="{_po_row_cls}">
-        <span>Bracket</span><span class="pred-counter-count">{_playoff_filled} / {_playoff_total}</span>
-      </div>
-      <div class="pred-counter-bar"><div class="pred-counter-bar-fill" style="width: {_po_pct:.1f}%;"></div></div>
+      <div class="pred-counter-bar"><div class="pred-counter-bar-fill" style="width: {_total_pct:.1f}%;"></div></div>
     </div>
 """
 st.markdown(_counter_html, unsafe_allow_html=True)

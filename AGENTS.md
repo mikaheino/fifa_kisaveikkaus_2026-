@@ -13,8 +13,10 @@ streamlit_app.py               # Production entry point — uses st.connection("
 streamlit_app_local.py         # Local dev entry point — instantiates MockSession instead of Snowpark
 mock_session.py                # MockSession class: fakes the Snowpark session.sql(...).collect()/.to_pandas()
                                #   surface, seeds the 72-game schedule + demo predictions + Saksa-wins playoff
-pyproject.toml                 # Container-runtime dependency manifest (streamlit[snowflake]==1.51.0, pandas)
+pyproject.toml                 # Container-runtime dependency manifest (streamlit[snowflake]==1.57.0, pandas)
                                #   Also used by uv for local dev
+deployed_to_snowflake          # Deployment status — tracks last deploy timestamp, Streamlit version,
+                               #   and full file list pushed to the live version. Updated after each deploy.
 AGENTS.md                      # This file
 CLAUDE.md                      # Claude Code essentials (brief, points here)
 README.md                      # Project overview and administration guide
@@ -357,6 +359,8 @@ participant accounts before running, or run those statements separately.
 
 Upload changed files to the stage, then copy them into the live version. **Do NOT drop the app** — the app URL is shared with end users and dropping would change it.
 
+**After deploying, update the `deployed_to_snowflake` file** in the project root with the current timestamp, Streamlit version, and the list of files deployed. This file is the source of truth for what is currently live.
+
 ```sql
 USE ROLE ACCOUNTADMIN;
 USE DATABASE STREAMLIT_APPS;
@@ -384,6 +388,11 @@ PUT file:///path/to/data/schedule_2026.json @FIFA_VEIKKAUS_STAGE/data/ AUTO_COMP
 PUT file:///path/to/assets/logo_2026.png @FIFA_VEIKKAUS_STAGE/assets/ AUTO_COMPRESS=FALSE OVERWRITE=TRUE;
 PUT file:///path/to/assets/maradona.gif  @FIFA_VEIKKAUS_STAGE/assets/ AUTO_COMPRESS=FALSE OVERWRITE=TRUE;
 PUT file:///path/to/assets/pirlo.gif     @FIFA_VEIKKAUS_STAGE/assets/ AUTO_COMPRESS=FALSE OVERWRITE=TRUE;
+
+-- Bundled fonts (Snowflake CSP blocks fonts.googleapis.com — woff2 is inlined as base64 in _theme.py)
+PUT file:///path/to/assets/fonts/Bungee.woff2       @FIFA_VEIKKAUS_STAGE/assets/fonts/ AUTO_COMPRESS=FALSE OVERWRITE=TRUE;
+PUT file:///path/to/assets/fonts/PressStart2P.woff2 @FIFA_VEIKKAUS_STAGE/assets/fonts/ AUTO_COMPRESS=FALSE OVERWRITE=TRUE;
+PUT file:///path/to/assets/fonts/VT323.woff2        @FIFA_VEIKKAUS_STAGE/assets/fonts/ AUTO_COMPRESS=FALSE OVERWRITE=TRUE;
 
 -- Dependencies (only when pyproject.toml changes)
 PUT file:///path/to/pyproject.toml @FIFA_VEIKKAUS_STAGE/ AUTO_COMPRESS=FALSE OVERWRITE=TRUE;

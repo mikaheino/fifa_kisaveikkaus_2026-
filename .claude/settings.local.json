@@ -51,7 +51,18 @@
       "Bash(git -C /Users/mika.heino/prod/mm_kisaveikkaus_2026 branch --show-current)",
       "Bash(ps *)",
       "Bash(kill 59273)",
-      "Bash(git commit *)"
+      "Bash(git commit *)",
+      "Bash(file *.woff2)",
+      "Bash(ruff check *)",
+      "Bash(kill 91007)",
+      "Bash(python3 -m streamlit run streamlit_app_local.py --server.port 8501 --server.headless true)",
+      "Bash(echo \"started $!\")",
+      "Bash(uv run *)",
+      "Bash(command -v uv)",
+      "Read(//Users/mika.heino/.local/bin/**)",
+      "Bash(pip3 show *)",
+      "Bash(kill 30141)",
+      "Bash(kill 30159)"
     ]
   }
 }

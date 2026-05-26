@@ -1,0 +1,25 @@
+last_deployed: 2026-05-26T11:12:05Z
+streamlit_version: 1.57.0
+live_version_path: snow://streamlit/STREAMLIT_APPS.FIFA_VEIKKAUS.FIFA_VEIKKAUS_APP/versions/live/
+
+files:
+  - streamlit_app.py
+  - schedule_data.py
+  - pyproject.toml
+  - data/schedule_2026.json
+  - app_pages/__init__.py
+  - app_pages/_bracket_picker.py
+  - app_pages/_celebrate.py
+  - app_pages/_group_picker.py
+  - app_pages/_momentum_slider.py
+  - app_pages/_team_grid_picker.py
+  - app_pages/_theme.py
+  - app_pages/admin_results.py
+  - app_pages/my_predictions.py
+  - app_pages/rules.py
+  - app_pages/standings.py
+  - assets/logo_2026.png
+  - assets/maradona.gif
+  - assets/pirlo.gif
+  - assets/diego.gif
+  - assets/goal.gif

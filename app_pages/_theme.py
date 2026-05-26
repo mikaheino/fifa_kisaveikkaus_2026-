@@ -16,6 +16,29 @@ import os
 import streamlit as st
 
 _MARADONA = os.path.join(os.path.dirname(__file__), "..", "assets", "maradona.gif")
+_FONTS_DIR = os.path.join(os.path.dirname(__file__), "..", "assets", "fonts")
+_FONT_FILES = {
+    "Bungee": "Bungee.woff2",
+    "Press Start 2P": "PressStart2P.woff2",
+    "VT323": "VT323.woff2",
+}
+
+
+def _font_face_css() -> str:
+    """Inline @font-face for each bundled woff2 — Snowflake's CSP blocks
+    fonts.googleapis.com / fonts.gstatic.com, so we ship the woff2 bytes
+    base64-encoded as data: URIs. Local dev gets the same fonts."""
+    blocks = []
+    for family, filename in _FONT_FILES.items():
+        path = os.path.join(_FONTS_DIR, filename)
+        if not os.path.exists(path):
+            continue
+        b64 = base64.b64encode(open(path, "rb").read()).decode()
+        blocks.append(
+            f"@font-face {{font-family:'{family}';font-style:normal;font-weight:400;"
+            f"font-display:swap;src:url(data:font/woff2;base64,{b64}) format('woff2');}}"
+        )
+    return "\n".join(blocks)
 
 
 def apply_theme() -> None:
@@ -62,10 +85,13 @@ def apply_theme() -> None:
         )
 
     st.markdown(
+        "<style>" + _font_face_css() + "</style>",
+        unsafe_allow_html=True,
+    )
+
+    st.markdown(
         """
         <style>
-        @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&family=Bungee&display=swap');
-
         /* Section headers — Italia '90 broadcast vibe */
         [data-testid="stMainBlockContainer"] h1,
         [data-testid="stMainBlockContainer"] h2,
