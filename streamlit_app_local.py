@@ -18,7 +18,7 @@ _ioag_b64 = _img_b64("assets/maradona.gif")
 st.markdown(
     f"""
     <style>
-    @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap');
+    @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Press+Start+2P&display=swap');
 
     body, p, div, h1, h2, h3, h4, h5, h6,
     label, input, button, select, textarea, a, li, td, th, caption,
@@ -174,27 +174,83 @@ st.markdown(
             inset 2px 2px rgba(20, 12, 4, 0.65) !important;
     }}
 
-    div[role="radiogroup"] {{ gap: 0.5rem; }}
+    /* Horizontal nav radio — 90s amber-CRT arcade cabinet buttons */
+    [data-testid="stRadio"] > div,
+    div[role="radiogroup"] {{
+        display: flex !important;
+        flex-wrap: wrap !important;
+        justify-content: center !important;
+        align-items: center !important;
+        gap: 0.7rem !important;
+        margin: 0.5rem auto 1.25rem auto !important;
+        padding: 0 !important;
+        background: transparent !important;
+        border: none !important;
+        box-shadow: none !important;
+    }}
     div[role="radiogroup"] label {{
-        padding: 6px 16px !important;
+        display: inline-flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        padding: 10px 18px !important;
+        min-width: 140px !important;
         border: none !important;
         border-radius: 0 !important;
         cursor: pointer;
-        background: rgba(140, 100, 25, 0.75) !important;
+        background: linear-gradient(180deg, rgba(45, 30, 8, 0.95), rgba(25, 17, 5, 0.95)) !important;
+        transition: background 0.12s ease, box-shadow 0.12s ease;
         box-shadow:
-            inset -1px -1px rgba(0, 0, 0, 0.90),
-            inset 1px 1px rgba(220, 180, 90, 0.70),
-            inset -2px -2px rgba(20, 12, 4, 0.65),
-            inset 2px 2px rgba(190, 155, 70, 0.28) !important;
+            inset 0 0 0 1px rgba(212, 160, 23, 0.55),
+            inset -2px -2px 0 0 rgba(0, 0, 0, 0.75),
+            inset 2px 2px 0 0 rgba(245, 200, 66, 0.30),
+            0 0 6px rgba(212, 160, 23, 0.25) !important;
+    }}
+    div[role="radiogroup"] label > div:first-child,
+    div[role="radiogroup"] label [data-baseweb="radio"],
+    div[role="radiogroup"] label input[type="radio"] {{
+        display: none !important;
+    }}
+    div[role="radiogroup"] label > div:last-child,
+    div[role="radiogroup"] label p {{
+        margin: 0 !important;
+        color: #f5c842 !important;
+        font-family: 'Press Start 2P', 'Courier New', monospace !important;
+        font-size: 0.65rem !important;
+        line-height: 1.4 !important;
+        letter-spacing: 0.05em !important;
+        text-transform: uppercase !important;
+        text-shadow:
+            0 0 4px rgba(245, 200, 66, 0.65),
+            0 0 8px rgba(212, 160, 23, 0.40) !important;
+    }}
+    div[role="radiogroup"] label:hover {{
+        background: linear-gradient(180deg, rgba(70, 48, 12, 0.97), rgba(45, 30, 8, 0.97)) !important;
+        box-shadow:
+            inset 0 0 0 1px rgba(245, 200, 66, 0.85),
+            inset -2px -2px 0 0 rgba(0, 0, 0, 0.70),
+            inset 2px 2px 0 0 rgba(245, 200, 66, 0.45),
+            0 0 12px rgba(245, 200, 66, 0.45) !important;
+    }}
+    div[role="radiogroup"] label:hover p {{
+        color: #ffe082 !important;
+        text-shadow:
+            0 0 6px rgba(255, 224, 130, 0.80),
+            0 0 14px rgba(245, 200, 66, 0.55) !important;
     }}
     div[role="radiogroup"] label:has(input:checked) {{
-        background: rgba(160, 110, 30, 0.92) !important;
-        color: #f5c842 !important;
+        background: linear-gradient(180deg, rgba(110, 75, 18, 0.97), rgba(80, 55, 12, 0.97)) !important;
         box-shadow:
-            inset -1px -1px rgba(220, 180, 90, 0.70),
-            inset 1px 1px rgba(0, 0, 0, 0.90),
-            inset -2px -2px rgba(190, 155, 70, 0.28),
-            inset 2px 2px rgba(20, 12, 4, 0.65) !important;
+            inset 0 0 0 1px rgba(255, 224, 130, 1.0),
+            inset 2px 2px 0 0 rgba(0, 0, 0, 0.70),
+            inset -2px -2px 0 0 rgba(255, 224, 130, 0.55),
+            0 0 18px rgba(255, 224, 130, 0.65) !important;
+    }}
+    div[role="radiogroup"] label:has(input:checked) p {{
+        color: #fff4c2 !important;
+        text-shadow:
+            0 0 6px rgba(255, 244, 194, 0.95),
+            0 0 14px rgba(255, 220, 100, 0.75),
+            0 0 22px rgba(255, 180, 30, 0.55) !important;
     }}
     </style>
     """,
@@ -219,14 +275,30 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-pages = st.navigation(
-    [
-        st.Page("app_pages/my_predictions.py", title="Omat veikkaukset"),
-        st.Page("app_pages/standings.py", title="Tilanne"),
-        st.Page("app_pages/rules.py", title="Saannot"),
-        st.Page("app_pages/admin_results.py", title="Syota tulokset"),
-    ],
-    position="top",
-)
+import importlib
+import sys
 
-pages.run()
+_ADMIN_EMAILS = {
+    "mika.heino@recordlydata.com",
+    "mikko.sulonen@recordlydata.com",
+    "marko.laitinen@recordlydata.com",
+}
+
+_page_titles = ["Omat veikkaukset", "Tilanne", "Säännöt"]
+if st.session_state.get("user_email") in _ADMIN_EMAILS:
+    _page_titles.append("Admin: Tulokset")
+
+_page_modules = {
+    "Omat veikkaukset": "app_pages.my_predictions",
+    "Tilanne":          "app_pages.standings",
+    "Säännöt":          "app_pages.rules",
+    "Admin: Tulokset":  "app_pages.admin_results",
+}
+
+selected = st.radio("", _page_titles, horizontal=True, label_visibility="collapsed")
+
+_mod = _page_modules[selected]
+if _mod in sys.modules:
+    importlib.reload(sys.modules[_mod])
+else:
+    importlib.import_module(_mod)

@@ -352,7 +352,7 @@ for letter in _GROUP_LETTERS:
     r_key = f"GROUP_{letter}_RUNNERUP"
     flag_teams = [with_flag(t) for t in teams]
     expander_title = f"Lohko {letter}: {', '.join(flag_teams)}"
-    with st.expander(expander_title, expanded=False):
+    with st.expander(expander_title, expanded=True):
         pick = group_picker(
             teams=teams,
             team_labels={t: with_flag(t) for t in teams},

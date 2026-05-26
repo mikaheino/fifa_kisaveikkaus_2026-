@@ -43,7 +43,14 @@
       "WebFetch(domain:community.snowflake.com)",
       "WebFetch(domain:docs.snowflake.cn)",
       "WebFetch(domain:docs.streamlit.io)",
-      "Bash(git check-ignore *)"
+      "Bash(git check-ignore *)",
+      "Bash(git push *)",
+      "Bash(git count-objects *)",
+      "Bash(git config *)",
+      "Bash(git -C /Users/mika.heino/prod/mm_kisaveikkaus_2026 log --oneline -5)",
+      "Bash(git -C /Users/mika.heino/prod/mm_kisaveikkaus_2026 branch --show-current)",
+      "Bash(ps *)",
+      "Bash(kill 59273)"
     ]
   }
 }
