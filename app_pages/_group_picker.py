@@ -120,6 +120,19 @@ _JS = r"""
 export default function (component) {
   const { data, parentElement, setStateValue } = component;
 
+  function broadcast(winner, runnerup) {
+    try {
+      const bc = new BroadcastChannel('fifa-picks');
+      bc.postMessage({
+        type: 'group',
+        letter: String(data?.letter ?? ''),
+        winner: winner || null,
+        runnerup: runnerup || null,
+      });
+      bc.close();
+    } catch (_) {}
+  }
+
   const teams = Array.isArray(data?.teams) ? [...data.teams] : [];
   const labels = (data && typeof data.team_labels === "object" && data.team_labels) || {};
   const labelFor = (t) => labels[t] || t;
@@ -176,6 +189,7 @@ export default function (component) {
     }
     paint();
     setStateValue("pick", { winner, runnerup });
+    broadcast(winner, runnerup);
   }
 
   // First-mount only — chip text doesn't change between renders.
@@ -203,6 +217,7 @@ def group_picker(
     winner: str | None = None,
     runnerup: str | None = None,
     key: str,
+    letter: str | None = None,
     on_change: Callable[[], None] | None = None,
 ) -> dict:
     """Render a 2-row click picker. Returns ``{"winner": ..., "runnerup": ...}``."""
@@ -225,6 +240,7 @@ def group_picker(
             "team_labels": dict(team_labels or {}),
             "winner": w_data,
             "runnerup": r_data,
+            "letter": (letter or key.split("_")[-1]),
         },
         on_pick_change=on_change or (lambda: None),
     )

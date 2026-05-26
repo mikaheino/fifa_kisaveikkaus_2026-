@@ -1,4 +1,5 @@
 import calendar
+import json
 import streamlit as st
 import streamlit.components.v1 as components
 import pandas as pd
@@ -210,182 +211,303 @@ all_match_ids: set[int] = set(schedule_df["ID"].astype(int).tolist())
 
 
 # ── Floating progress counter (top-right, persists on scroll) ────────────────
-# Counts reflect BOTH already-saved DB rows AND in-progress picks held in
-# session_state, so the panel shows the user's current intent before they hit
-# the save button. Updates on every full app rerun (save, Saksa/USA celebrate,
-# all-groups-complete celebrate, navigation).
-_group_total = 72
+# Counter lives in its own `components.html` iframe (so it can run JS) and
+# updates live by subscribing to a `BroadcastChannel('fifa-picks')`. Every
+# CCv2 picker (slider, group, thirds-grid, bracket) broadcasts on commit, so
+# the count refreshes without any Streamlit rerun. Initial state is seeded
+# from session_state + DB so the count is accurate on page load.
+_GROUP_TOTAL = 72
+_PLAYOFF_TOTAL = 12 + 12 + 8 + 16 + 8 + 4 + 2 + 1 + 1 + 1  # 65
+_TOTAL_TARGET = _GROUP_TOTAL + _PLAYOFF_TOTAL  # 137
 
 
-def _count_group_filled() -> int:
-    n = 0
+def _initial_counter_state() -> dict:
+    """Snapshot of every counted slot at the start of this render. JS then
+    mutates this object via broadcast messages from the picker iframes."""
+    matches_filled: list[int] = []
     for gid in all_match_ids:
         st_obj = st.session_state.get(f"mom_{gid}")
         score = getattr(st_obj, "score", None) if st_obj is not None else None
         if isinstance(score, dict) and "home" in score and "away" in score:
-            n += 1
+            matches_filled.append(int(gid))
             continue
         ep = existing_preds.get(gid, (None, None))
         if ep[0] is not None:
-            n += 1
-    return n
+            matches_filled.append(int(gid))
 
-
-def _count_playoff_filled() -> int:
-    """Count slots filled. If a picker has live session_state (user has
-    interacted with it), trust only that — otherwise fall back to the cached
-    DB row. The CCv2 result object exposes its value via an attribute
-    (.pick / .selected / .picks)."""
-    n = 0
+    groups: dict[str, dict] = {}
     for letter in _GROUP_LETTERS:
         grp_state = st.session_state.get(f"grp_{letter}")
         grp_pick = getattr(grp_state, "pick", None) if grp_state is not None else None
         if isinstance(grp_pick, dict):
-            w = grp_pick.get("winner")
-            r = grp_pick.get("runnerup")
+            w = grp_pick.get("winner") or None
+            r = grp_pick.get("runnerup") or None
         else:
-            w = playoff_existing.get(f"GROUP_{letter}_WINNER")
-            r = playoff_existing.get(f"GROUP_{letter}_RUNNERUP")
-        if w and w != "—": n += 1
-        if r and r != "—": n += 1
+            w = playoff_existing.get(f"GROUP_{letter}_WINNER") or None
+            r = playoff_existing.get(f"GROUP_{letter}_RUNNERUP") or None
+        groups[letter] = {"winner": w, "runnerup": r}
 
     third_state = st.session_state.get("grid_third")
     third_live = getattr(third_state, "selected", None) if third_state is not None else None
     if isinstance(third_live, list):
-        n += min(len([t for t in third_live if t]), 8)
+        thirds = [t for t in third_live if t]
     else:
-        n += sum(1 for i in range(1, 9) if playoff_existing.get(f"THIRD_{i}"))
+        thirds = [
+            playoff_existing[f"THIRD_{i}"]
+            for i in range(1, 9)
+            if playoff_existing.get(f"THIRD_{i}")
+        ]
 
     bracket_state = st.session_state.get("bracket_picker")
-    bracket_picks = getattr(bracket_state, "picks", None) if bracket_state is not None else None
-    for stage, count in (("r16", 16), ("qf", 8), ("sf", 4), ("finalists", 2)):
-        if isinstance(bracket_picks, dict) and stage in bracket_picks:
-            live = bracket_picks.get(stage)
-            if isinstance(live, list):
-                n += min(len([t for t in live if t]), count)
-        else:
-            prefix = "FINALIST" if stage == "finalists" else stage.upper()
-            n += sum(
-                1 for i in range(1, count + 1)
-                if playoff_existing.get(f"{prefix}_{i}")
-            )
-    if isinstance(bracket_picks, dict) and "champion" in bracket_picks:
+    bracket_picks = (
+        getattr(bracket_state, "picks", None) if bracket_state is not None else None
+    )
+    bracket: dict = {"r16": [], "qf": [], "sf": [], "finalists": [], "champion": None}
+    if isinstance(bracket_picks, dict):
+        for stage in ("r16", "qf", "sf", "finalists"):
+            v = bracket_picks.get(stage)
+            if isinstance(v, list):
+                bracket[stage] = [t for t in v if t]
         champ = bracket_picks.get("champion")
+        bracket["champion"] = champ if (champ and champ != "—") else None
     else:
+        for stage, count in (("r16", 16), ("qf", 8), ("sf", 4), ("finalists", 2)):
+            prefix = "FINALIST" if stage == "finalists" else stage.upper()
+            bracket[stage] = [
+                playoff_existing[f"{prefix}_{i}"]
+                for i in range(1, count + 1)
+                if playoff_existing.get(f"{prefix}_{i}")
+            ]
         champ = playoff_existing.get("CHAMPION")
-    if champ and champ != "—":
-        n += 1
+        bracket["champion"] = champ if (champ and champ != "—") else None
 
-    # Text input / selectbox: session_state holds the current widget value
-    # after first render (Streamlit pre-fills from `value=`/`index=`), so we
-    # trust it without falling back to DB.
     scorer_state = st.session_state.get("ti_scorer")
-    scorer = (scorer_state if scorer_state is not None else playoff_existing.get("TOP_SCORER") or "")
-    if isinstance(scorer, str) and scorer.strip():
-        n += 1
+    scorer = (
+        scorer_state
+        if scorer_state is not None
+        else (playoff_existing.get("TOP_SCORER") or "")
+    )
+    scorer_set = bool(isinstance(scorer, str) and scorer.strip())
+
     dark_state = st.session_state.get("sel_darkhorse")
     dark = dark_state if dark_state is not None else playoff_existing.get("DARK_HORSE")
-    if dark and dark != "—":
-        n += 1
+    dark_set = bool(dark and dark != "—")
+
+    return {
+        "matches": matches_filled,
+        "groups": groups,
+        "thirds": thirds,
+        "bracket": bracket,
+        "scorer_set": scorer_set,
+        "dark_set": dark_set,
+    }
+
+
+_counter_initial = _initial_counter_state()
+_counter_initial_json = json.dumps(_counter_initial)
+
+
+def _initial_count(state: dict) -> int:
+    n = len(state["matches"])
+    for g in state["groups"].values():
+        if g.get("winner") and g["winner"] != "—": n += 1
+        if g.get("runnerup") and g["runnerup"] != "—": n += 1
+    n += min(len(state["thirds"]), 8)
+    n += min(len(state["bracket"]["r16"]), 16)
+    n += min(len(state["bracket"]["qf"]), 8)
+    n += min(len(state["bracket"]["sf"]), 4)
+    n += min(len(state["bracket"]["finalists"]), 2)
+    if state["bracket"]["champion"]: n += 1
+    if state["scorer_set"]: n += 1
+    if state["dark_set"]: n += 1
     return n
 
 
-_group_filled = _count_group_filled()
-_playoff_total = (
-    12 + 12 + 8 + 16 + 8 + 4 + 2 + 1 + 1 + 1
-)  # 65: winners, runners, thirds, R16, QF, SF, finalists, champion, scorer, dark horse
-_playoff_filled = min(_count_playoff_filled(), _playoff_total)
+_initial_n = _initial_count(_counter_initial)
+_initial_pct = (_initial_n / _TOTAL_TARGET) * 100 if _TOTAL_TARGET else 0
+_initial_row_cls = "pred-counter-row done" if _initial_n >= _TOTAL_TARGET else "pred-counter-row"
 
-_total_filled = _group_filled + _playoff_filled
-_total_target = _group_total + _playoff_total
-_total_pct = (_total_filled / _total_target) * 100 if _total_target else 0
-_row_cls = "pred-counter-row done" if _total_filled >= _total_target else "pred-counter-row"
-
-_counter_html = f"""
+# Fixed-position chrome rendered into the parent DOM (st.markdown strips
+# <script> but keeps the styled box). The live values get rewritten by the
+# hidden iframe below whenever a picker broadcasts on the BroadcastChannel.
+st.markdown(
+    f"""
     <style>
     .pred-counter {{
-        position: fixed;
-        top: 14px;
-        right: 18px;
-        z-index: 998;
-        display: flex;
-        flex-direction: column;
-        gap: 6px;
-        padding: 10px 14px;
-        min-width: 200px;
-        background: linear-gradient(180deg, rgba(45, 30, 8, 0.95), rgba(25, 17, 5, 0.95));
+        position: fixed; top: 14px; right: 18px; z-index: 100000;
+        display: flex; flex-direction: column; gap: 8px;
+        padding: 14px 18px 16px; min-width: 260px;
+        background: linear-gradient(180deg, rgba(58, 36, 8, 0.97), rgba(22, 14, 4, 0.97));
         font-family: 'Press Start 2P', 'Courier New', monospace;
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
+        text-transform: uppercase; letter-spacing: 0.08em;
+        border: 3px solid #f5c842; border-radius: 4px;
         box-shadow:
-            inset 0 0 0 1px rgba(212, 160, 23, 0.55),
-            inset -2px -2px 0 0 rgba(0, 0, 0, 0.75),
-            inset 2px 2px 0 0 rgba(245, 200, 66, 0.30),
-            0 0 10px rgba(212, 160, 23, 0.30);
+            inset 0 0 0 2px rgba(0, 0, 0, 0.85),
+            inset 0 0 12px rgba(245, 200, 66, 0.18),
+            0 0 0 1px rgba(0, 0, 0, 0.85),
+            0 0 14px rgba(245, 200, 66, 0.55),
+            0 0 28px rgba(212, 110, 23, 0.45);
+    }}
+    .pred-counter-player {{
+        font-size: 0.62rem; color: #ff5edc; text-align: center; line-height: 1.4;
+        text-shadow: 1px 1px 0 #1a0814, 0 0 6px rgba(255, 94, 220, 0.85), 0 0 14px rgba(255, 94, 220, 0.55);
+        padding-bottom: 6px; border-bottom: 2px dashed rgba(245, 200, 66, 0.45);
+    }}
+    .pred-counter-player .pred-counter-player-label {{
+        color: #6ff0ff; text-shadow: 1px 1px 0 #001818, 0 0 6px rgba(111, 240, 255, 0.85); margin-right: 6px;
     }}
     .pred-counter-title {{
-        font-size: 0.55rem;
-        color: #d4a017;
-        text-align: center;
-        margin-bottom: 2px;
-        text-shadow: 0 0 4px rgba(212, 160, 23, 0.50);
+        font-size: 0.72rem; color: #ffd95c; text-align: center;
+        text-shadow: 1px 1px 0 #1a1208, 0 0 6px rgba(255, 217, 92, 0.85), 0 0 14px rgba(245, 165, 20, 0.55);
     }}
     .pred-counter-row {{
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        gap: 8px;
-        font-size: 0.55rem;
-        color: #f5c842;
-        text-shadow:
-            0 0 4px rgba(245, 200, 66, 0.65),
-            0 0 8px rgba(212, 160, 23, 0.40);
+        display: flex; justify-content: space-between; align-items: center; gap: 10px;
+        font-size: 0.80rem; color: #f5c842;
+        text-shadow: 1px 1px 0 #1a1208, 0 0 6px rgba(245, 200, 66, 0.85), 0 0 14px rgba(212, 160, 23, 0.55);
     }}
     .pred-counter-row.done {{
         color: #c8ff70;
-        text-shadow:
-            0 0 4px rgba(200, 255, 112, 0.75),
-            0 0 8px rgba(160, 220, 60, 0.45);
+        text-shadow: 1px 1px 0 #0a1404, 0 0 6px rgba(200, 255, 112, 0.90), 0 0 14px rgba(160, 220, 60, 0.60);
     }}
-    .pred-counter-row .pred-counter-count {{
-        font-size: 0.60rem;
-        white-space: nowrap;
-    }}
+    .pred-counter-row .pred-counter-count {{ font-size: 1.10rem; white-space: nowrap; letter-spacing: 0.06em; }}
     .pred-counter-bar {{
-        height: 4px;
-        width: 100%;
-        background: rgba(0, 0, 0, 0.65);
-        box-shadow: inset 0 0 0 1px rgba(212, 160, 23, 0.45);
-        margin-top: 2px;
+        height: 8px; width: 100%; background: rgba(0, 0, 0, 0.85);
+        box-shadow: inset 0 0 0 2px rgba(245, 200, 66, 0.65), inset 0 0 4px rgba(0, 0, 0, 0.9);
+        margin-top: 4px;
     }}
     .pred-counter-bar-fill {{
-        height: 100%;
-        background: linear-gradient(90deg, #d4a017, #f5c842, #ffe082);
-        box-shadow: 0 0 6px rgba(245, 200, 66, 0.65);
+        height: 100%; background: linear-gradient(90deg, #ff5edc, #ffd95c, #6ff0ff);
+        box-shadow: 0 0 6px rgba(255, 217, 92, 0.85), 0 0 12px rgba(245, 200, 66, 0.65);
+        transition: width 0.25s ease-out;
     }}
     @media (max-width: 640px) {{
-        .pred-counter {{
-            top: 8px;
-            right: 8px;
-            min-width: 160px;
-            padding: 7px 9px;
-        }}
-        .pred-counter-title,
-        .pred-counter-row,
-        .pred-counter-row .pred-counter-count {{
-            font-size: 0.48rem !important;
-        }}
+        .pred-counter {{ top: 8px; right: 8px; min-width: 190px; padding: 10px 12px 12px; gap: 6px; }}
+        .pred-counter-player {{ font-size: 0.50rem; }}
+        .pred-counter-title {{ font-size: 0.58rem; }}
+        .pred-counter-row {{ font-size: 0.60rem; }}
+        .pred-counter-row .pred-counter-count {{ font-size: 0.85rem; }}
+        .pred-counter-bar {{ height: 6px; }}
     }}
     </style>
     <div class="pred-counter">
-      <div class="pred-counter-title">Challenge status</div>
-      <div class="{_row_cls}">
-        <span>Veikkaukset</span><span class="pred-counter-count">{_total_filled} / {_total_target}</span>
+      <div class="pred-counter-player">
+        <span class="pred-counter-player-label">Player:</span>{display_name}
       </div>
-      <div class="pred-counter-bar"><div class="pred-counter-bar-fill" style="width: {_total_pct:.1f}%;"></div></div>
+      <div class="pred-counter-title">Challenge status</div>
+      <div id="pc-row" class="{_initial_row_cls}">
+        <span>Veikkaukset</span><span id="pc-count" class="pred-counter-count">{_initial_n} / {_TOTAL_TARGET}</span>
+      </div>
+      <div class="pred-counter-bar"><div id="pc-bar" class="pred-counter-bar-fill" style="width: {_initial_pct:.1f}%;"></div></div>
     </div>
-"""
-st.markdown(_counter_html, unsafe_allow_html=True)
+    """,
+    unsafe_allow_html=True,
+)
+
+# Hidden iframe carries the JS that listens for BroadcastChannel pings from the
+# picker iframes and rewrites the counter elements in the parent DOM (same
+# Streamlit origin → cross-frame DOM access is allowed). Falls back silently
+# if the API is unavailable.
+_counter_js_html = f"""<!doctype html><html><head><meta charset="utf-8"></head><body><script>
+(function() {{
+  const TARGET = {_TOTAL_TARGET};
+  const state = {_counter_initial_json};
+  state.matches = new Set((state.matches || []).map(Number));
+  state.groups = state.groups || {{}};
+  state.thirds = Array.isArray(state.thirds) ? state.thirds.filter(Boolean) : [];
+  state.bracket = state.bracket || {{r16: [], qf: [], sf: [], finalists: [], champion: null}};
+  ["r16","qf","sf","finalists"].forEach(k => {{
+    state.bracket[k] = Array.isArray(state.bracket[k]) ? state.bracket[k].filter(Boolean) : [];
+  }});
+
+  function recount() {{
+    let n = 0;
+    n += state.matches.size;
+    for (const k of Object.keys(state.groups)) {{
+      const g = state.groups[k] || {{}};
+      if (g.winner && g.winner !== '—') n++;
+      if (g.runnerup && g.runnerup !== '—') n++;
+    }}
+    n += Math.min(state.thirds.length, 8);
+    n += Math.min(state.bracket.r16.length, 16);
+    n += Math.min(state.bracket.qf.length, 8);
+    n += Math.min(state.bracket.sf.length, 4);
+    n += Math.min(state.bracket.finalists.length, 2);
+    if (state.bracket.champion && state.bracket.champion !== '—') n++;
+    if (state.scorer_set) n++;
+    if (state.dark_set) n++;
+    return n;
+  }}
+
+  // Walk up to the topmost same-origin window that hosts the counter chrome.
+  function getParentDoc() {{
+    let w = window;
+    for (let i = 0; i < 6; i++) {{
+      try {{
+        const next = w.parent;
+        if (!next || next === w) return w.document;
+        // Probe access; throws if cross-origin.
+        void next.document;
+        w = next;
+      }} catch (_) {{
+        return w.document;
+      }}
+    }}
+    return w.document;
+  }}
+
+  function paintIn(doc) {{
+    const n = recount();
+    const c = doc.getElementById('pc-count');
+    const b = doc.getElementById('pc-bar');
+    const r = doc.getElementById('pc-row');
+    if (c) c.textContent = `${{n}} / ${{TARGET}}`;
+    if (b) b.style.width = `${{Math.min(100, (n / TARGET) * 100).toFixed(1)}}%`;
+    if (r) {{
+      if (n >= TARGET) r.classList.add('done');
+      else r.classList.remove('done');
+    }}
+    return !!c;
+  }}
+
+  function paint() {{
+    // Try parent chain first; if elements not found there, also try our own
+    // document and window.top as fallbacks.
+    if (paintIn(getParentDoc())) return;
+    try {{ if (paintIn(window.top.document)) return; }} catch (_) {{}}
+    paintIn(document);
+  }}
+
+  paint();
+
+  try {{
+    const channel = new BroadcastChannel('fifa-picks');
+    channel.onmessage = (e) => {{
+      const m = e.data || {{}};
+      if (m.type === 'match') {{
+        const id = Number(m.id);
+        if (m.filled) state.matches.add(id);
+        else state.matches.delete(id);
+      }} else if (m.type === 'group') {{
+        state.groups[m.letter] = {{winner: m.winner || null, runnerup: m.runnerup || null}};
+      }} else if (m.type === 'thirds') {{
+        state.thirds = Array.isArray(m.teams) ? m.teams.filter(Boolean) : [];
+      }} else if (m.type === 'bracket') {{
+        const p = m.picks || {{}};
+        ["r16","qf","sf","finalists"].forEach(k => {{
+          state.bracket[k] = Array.isArray(p[k]) ? p[k].filter(Boolean) : [];
+        }});
+        state.bracket.champion = p.champion || null;
+      }} else {{
+        return;
+      }}
+      paint();
+    }};
+  }} catch (e) {{
+    console.warn('fifa-picks broadcast unavailable:', e);
+  }}
+}})();
+</script></body></html>"""
+components.html(_counter_js_html, height=0)
 
 
 # ── Incomplete warning ────────────────────────────────────────────────────────
@@ -415,24 +537,19 @@ st.caption(
 @st.fragment
 def _render_match_slider(gid: int, match: str, default: tuple | None) -> None:
     """Each match renders in its own fragment so dragging one slider only
-    reruns that single block instead of the whole page."""
+    reruns that single block instead of the whole page. The Pirlo overlay
+    is emitted *inside* this fragment when a Saksa/USA pick lands — no
+    app-rerun, so the 71 other slider iframes are untouched."""
     home, _, away = match.partition(" vs ")
+    # Pass plain names — the slider renders each country's flag as a giant
+    # faded background image, so the emoji prefix would be visually redundant.
     momentum_slider(
         match_id=gid,
-        home_team=with_flag(home.strip()),
-        away_team=with_flag(away.strip()),
+        home_team=home.strip(),
+        away_team=away.strip(),
         default_score=default,
     )
-    # After the user commits a score, check whether they just crossed a
-    # 5-pick milestone — fires a full-app rerun that paints the overlay.
     maybe_celebrate()
-    # Trigger a full app rerun only when the filled count actually changes,
-    # so the top-right counter refreshes on real picks without re-running the
-    # whole page on every micro-interaction.
-    _cur = _count_group_filled()
-    if _cur != st.session_state.get("_seen_group_filled", -1):
-        st.session_state["_seen_group_filled"] = _cur
-        st.rerun(scope="app")
 
 
 # Flat list — all 72 matches visible at once, grouped only by a date header.
@@ -720,14 +837,6 @@ def _render_playoff_section() -> None:
             st.rerun(scope="app")
         except Exception as e:
             st.error(f"Virhe pudotuspeliveikkausten tallennuksessa: {e}")
-
-    # Same delta-trigger as the slider fragment: fire a full app rerun only when
-    # the playoff count actually changes (a new pick was committed), so the
-    # top-right counter stays in sync.
-    _cur_po = _count_playoff_filled()
-    if _cur_po != st.session_state.get("_seen_playoff_filled", -1):
-        st.session_state["_seen_playoff_filled"] = _cur_po
-        st.rerun(scope="app")
 
 
 _render_playoff_section()

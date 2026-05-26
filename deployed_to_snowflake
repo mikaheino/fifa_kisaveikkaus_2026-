@@ -1,4 +1,4 @@
-last_deployed: 2026-05-26T11:12:05Z
+last_deployed: 2026-05-26T18:15:00Z
 streamlit_version: 1.57.0
 live_version_path: snow://streamlit/STREAMLIT_APPS.FIFA_VEIKKAUS.FIFA_VEIKKAUS_APP/versions/live/
 
@@ -23,3 +23,6 @@ files:
   - assets/pirlo.gif
   - assets/diego.gif
   - assets/goal.gif
+  - assets/fonts/Bungee.woff2
+  - assets/fonts/PressStart2P.woff2
+  - assets/fonts/VT323.woff2

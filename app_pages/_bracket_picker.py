@@ -374,13 +374,19 @@ export default function (component) {
   }
 
   function emit() {
-    setStateValue("picks", {
+    const picks = {
       r16: [...state[1]],
       qf: [...state[2]],
       sf: [...state[3]],
       finalists: [...state[4]],
       champion: state[5][0] ?? null,
-    });
+    };
+    setStateValue("picks", picks);
+    try {
+      const bc = new BroadcastChannel('fifa-picks');
+      bc.postMessage({ type: 'bracket', picks });
+      bc.close();
+    } catch (_) {}
   }
 
   // Only re-emit when normalization actually changed the picks (e.g. dropped

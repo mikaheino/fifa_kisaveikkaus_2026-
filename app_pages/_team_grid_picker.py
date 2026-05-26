@@ -156,6 +156,14 @@ export default function (component) {
 
   function emit() {
     setStateValue("selected", [...selected]);
+    try {
+      const bc = new BroadcastChannel('fifa-picks');
+      bc.postMessage({
+        type: data?.channel || 'thirds',
+        teams: [...selected],
+      });
+      bc.close();
+    } catch (_) {}
   }
 
   // First-mount: build chips. Subsequent reruns: reuse them.
