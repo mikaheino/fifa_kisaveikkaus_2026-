@@ -7,7 +7,7 @@ from datetime import datetime
 
 from app_pages._momentum_slider import momentum_slider
 from app_pages._bracket_picker import bracket_picker
-from app_pages._team_grid_picker import team_grid_picker
+from app_pages._third_place_picker import third_place_picker
 from app_pages._group_picker import group_picker
 
 from app_pages._theme import apply_theme
@@ -718,7 +718,11 @@ def _render_playoff_section() -> None:
 
     # ── Parhaat kolmoset (8 best third-placed) ──────────────────────────────
     st.markdown("**Parhaat kolmoset – valitse 8 joukkuetta**")
-    st.caption("8 lohkokolmosta etenee R32-vaiheeseen (1 p / kpl).")
+    st.caption(
+        "Valitse kustakin lohkosta sen kolmossijainen — kahdesta jäljellä "
+        "olevasta joukkueesta. 8 parasta lohkokolmosta etenee R32-vaiheeseen "
+        "(1 p / kpl)."
+    )
 
     # The third-place pool is every team that is neither a group winner nor a
     # runner-up. While groups are still being filled, that pool is ambiguous —
@@ -731,15 +735,27 @@ def _render_playoff_section() -> None:
     _groups_complete = _n_winners_done == _n_groups and _n_runners_done == _n_groups
 
     if _groups_complete:
-        _picked_w_r = {
-            t for (w, r) in group_picks.values() for t in (w, r) if t and t != "—"
+        # One card per group: winner + runner-up shown locked for context, the
+        # two remaining teams are the selectable third-place candidates.
+        _third_groups = []
+        for letter in _GROUP_LETTERS:
+            w, r = group_picks[letter]
+            candidates = [t for t in GROUPS[letter] if t not in (w, r)]
+            _third_groups.append({
+                "letter": letter,
+                "winner": w if w != "—" else None,
+                "runnerup": r if r != "—" else None,
+                "candidates": candidates,
+            })
+        _shown_teams = {
+            t for g in _third_groups
+            for t in (*g["candidates"], g["winner"], g["runnerup"]) if t
         }
-        _third_options = [t for t in TEAMS if t not in _picked_w_r]
 
-        third_teams = team_grid_picker(
-            teams=_third_options,
+        third_teams = third_place_picker(
+            groups=_third_groups,
             selected=_ms_defaults("THIRD", 8),
-            team_labels={t: with_flag(t) for t in _third_options},
+            team_labels={t: with_flag(t) for t in _shown_teams},
             max_selected=8,
             key="grid_third",
         )
