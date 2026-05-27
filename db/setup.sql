@@ -465,6 +465,27 @@ AS
 
 ALTER TASK FIFA_VEIKKAUS_AUTOSTOP_TASK RESUME;
 
+/* ── 7d. Network rule + External Access Integration (PyPI) ────────────
+   The container runtime needs outbound HTTPS to PyPI to pip-install
+   packages declared in pyproject.toml. Without the EAI, only pre-installed
+   packages are available and version pins fail.
+   SYSADMIN needs USAGE on the network rule because the Streamlit app's
+   internal service account resolves EAIs through that role hierarchy.
+   ──────────────────────────────────────────────────────────────────── */
+CREATE NETWORK RULE IF NOT EXISTS PYPI_NETWORK_RULE
+    MODE = EGRESS
+    TYPE = HOST_PORT
+    VALUE_LIST = ('pypi.org', 'files.pythonhosted.org');
+
+CREATE EXTERNAL ACCESS INTEGRATION IF NOT EXISTS PYPI_ACCESS_INTEGRATION
+    ALLOWED_NETWORK_RULES = (PYPI_NETWORK_RULE)
+    ENABLED = TRUE;
+
+GRANT USAGE ON NETWORK RULE STREAMLIT_APPS.FIFA_VEIKKAUS.PYPI_NETWORK_RULE
+    TO ROLE SYSADMIN;
+GRANT USAGE ON INTEGRATION PYPI_ACCESS_INTEGRATION
+    TO ROLE SYSADMIN;
+
 /* ── 8. Streamlit app object ─────────────────────────────────────────
    Run AFTER uploading source files to FIFA_VEIKKAUS_STAGE (see AGENTS.md
    "Deploying files after changes"). Container runtime requires the FROM
@@ -486,6 +507,7 @@ CREATE STREAMLIT IF NOT EXISTS FIFA_VEIKKAUS_APP
     RUNTIME_NAME  = 'SYSTEM$ST_CONTAINER_RUNTIME_PY3_11'
     COMPUTE_POOL  = FIFA_VEIKKAUS_POOL
     QUERY_WAREHOUSE = 'FIFA_VEIKKAUS_WH'
+    EXTERNAL_ACCESS_INTEGRATIONS = (PYPI_ACCESS_INTEGRATION)
     COMMENT = 'FIFA-veikkaus 2026 — production app (container runtime)';
 
 ALTER STREAMLIT FIFA_VEIKKAUS_APP ADD LIVE VERSION FROM LAST;
