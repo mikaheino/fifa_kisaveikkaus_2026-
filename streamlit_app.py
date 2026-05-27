@@ -261,9 +261,11 @@ st.markdown(
 # All viewers share ONE container instance, so this connection's underlying
 # Snowpark session is shared across every viewer's script-runner thread. Snowpark
 # sessions are NOT thread-safe, so every DB access must go through
-# `conn.safe_session()` (the connection's built-in lock) — never the raw
-# `.session()`. Store the connection, not a bare session object.
-st.session_state.snowpark_conn = st.connection("snowflake")
+# `conn.safe_session()` — a process-wide lock added by SafeConnection (the raw
+# SnowflakeConnection has only `.session()`, with no locking). The wrapper is
+# cached via st.cache_resource so all viewers share one lock.
+from safe_connection import get_safe_connection
+st.session_state.snowpark_conn = get_safe_connection()
 
 # -- Resolve the viewer's identity --
 # st.user.email returns the viewer's email in both warehouse and container runtimes.

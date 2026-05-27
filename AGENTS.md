@@ -9,7 +9,8 @@ Runs as a **Streamlit in Snowflake (SiS) app on the container runtime** (Snowfla
 # Directory Structure
 
 ```
-streamlit_app.py               # Production entry point — stores st.connection("snowflake"); pages query via conn.safe_session()
+streamlit_app.py               # Production entry point — stores get_safe_connection(); pages query via conn.safe_session()
+safe_connection.py             # SafeConnection wrapper: adds process-wide thread-safe safe_session() to st.connection("snowflake")
 streamlit_app_local.py         # Local dev entry point — instantiates MockSession instead of Snowpark
 mock_session.py                # MockSession class: fakes the Snowpark session.sql(...).collect()/.to_pandas()
                                #   surface, seeds the 72-game schedule + demo predictions + Saksa-wins playoff
@@ -143,16 +144,22 @@ All viewers share **one** container instance, so the connection's underlying
 Snowpark session is shared across every viewer's script-runner thread. **Snowpark
 sessions are not thread-safe** — concurrent queries on a shared session race on the
 single underlying connection and can return one viewer's result rows to another
-viewer's thread (a real cross-user data leak). Always go through the connection's
+viewer's thread (a real cross-user data leak). Always go through the
 thread-safe `safe_session()` context manager; never hold the raw `.session()`.
 
+The raw `SnowflakeConnection` has only `.session()` (no locking), so the lock
+lives in `safe_connection.py`: `SafeConnection` wraps the connection and adds a
+process-wide lock, exposed via `get_safe_connection()` (cached with
+`st.cache_resource` so every viewer shares ONE wrapper and ONE lock).
+
 ```python
-# Container runtime (correct) — store the CONNECTION, query via safe_session()
-st.session_state.snowpark_conn = st.connection("snowflake")
+# Container runtime (correct) — store the WRAPPER, query via safe_session()
+from safe_connection import get_safe_connection
+st.session_state.snowpark_conn = get_safe_connection()
 user_email = st.user.email.lower()
 
 conn = st.session_state.snowpark_conn
-with conn.safe_session() as session:           # built-in thread-safe lock
+with conn.safe_session() as session:           # process-wide thread-safe lock
     df = session.sql("SELECT ...").to_pandas()
 
 # Keep a DELETE+INSERT (or any multi-statement unit) inside ONE safe_session
