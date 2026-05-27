@@ -257,10 +257,12 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-if "snowpark_session" not in st.session_state:
-    st.session_state.snowpark_session = MockSession()
+# MockSession doubles as the connection: its safe_session() yields itself, so
+# pages can use the same `conn.safe_session()` pattern locally as in production.
+if "snowpark_conn" not in st.session_state:
+    st.session_state.snowpark_conn = MockSession()
 
-# Match production: streamlit_app.py resolves user_email via CURRENT_USER() and
+# Match production: streamlit_app.py resolves user_email via st.user.email and
 # admin_results.py gates on it. Set it locally so the admin page works without
 # extra setup.
 if "user_email" not in st.session_state:

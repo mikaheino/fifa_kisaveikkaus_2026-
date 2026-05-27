@@ -257,8 +257,13 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# -- Snowflake session (container runtime requires st.connection, not get_active_session) --
-st.session_state.snowpark_session = st.connection("snowflake").session()
+# -- Snowflake connection (container runtime requires st.connection, not get_active_session) --
+# All viewers share ONE container instance, so this connection's underlying
+# Snowpark session is shared across every viewer's script-runner thread. Snowpark
+# sessions are NOT thread-safe, so every DB access must go through
+# `conn.safe_session()` (the connection's built-in lock) — never the raw
+# `.session()`. Store the connection, not a bare session object.
+st.session_state.snowpark_conn = st.connection("snowflake")
 
 # -- Resolve the viewer's identity --
 # st.user.email returns the viewer's email in both warehouse and container runtimes.
@@ -267,10 +272,11 @@ st.session_state.user_email = st.user.email.lower()
 # Activity ping for the auto-suspend Task in db/setup.sql section 7c:
 # the Task suspends FIFA_VEIKKAUS_POOL after 60 min without rows here.
 try:
-    st.session_state.snowpark_session.sql(
-        "INSERT INTO FIFA_VEIKKAUS_ACTIVITY (TS, USER_EMAIL) "
-        f"VALUES (CURRENT_TIMESTAMP(), '{st.session_state.user_email}')"
-    ).collect()
+    with st.session_state.snowpark_conn.safe_session() as _session:
+        _session.sql(
+            "INSERT INTO FIFA_VEIKKAUS_ACTIVITY (TS, USER_EMAIL) "
+            f"VALUES (CURRENT_TIMESTAMP(), '{st.session_state.user_email}')"
+        ).collect()
 except Exception:
     pass
 

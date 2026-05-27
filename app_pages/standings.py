@@ -1,7 +1,9 @@
 import streamlit as st
 import pandas as pd
 
-session = st.session_state.snowpark_session
+# Shared connection — every query runs inside `conn.safe_session()` (thread-safe
+# lock) because all viewers share one container instance. See AGENTS.md.
+conn = st.session_state.snowpark_conn
 
 SCHEMA = "FIFA_VEIKKAUS"
 PREDICTIONS_TABLE = f"{SCHEMA}.FIFA_VEIKKAUS_PREDICTIONS"
@@ -46,9 +48,10 @@ st.title("Tilanne")
 
 
 def get_players() -> list[str]:
-    rows = session.sql(
-        f"SELECT DISTINCT USER_EMAIL FROM {PREDICTIONS_TABLE} ORDER BY USER_EMAIL"
-    ).collect()
+    with conn.safe_session() as session:
+        rows = session.sql(
+            f"SELECT DISTINCT USER_EMAIL FROM {PREDICTIONS_TABLE} ORDER BY USER_EMAIL"
+        ).collect()
     return [row["USER_EMAIL"] for row in rows]
 
 
@@ -84,12 +87,14 @@ def compute_player_points(player_email: str) -> pd.DataFrame:
       AND r.MATCH IS NOT NULL
     ORDER BY r.ID
     """
-    return session.sql(sql).to_pandas()
+    with conn.safe_session() as session:
+        return session.sql(sql).to_pandas()
 
 
 def _load_playoff_results() -> dict:
     try:
-        df = session.sql(f"SELECT * FROM {PLAYOFF_RESULTS_TABLE}").to_pandas()
+        with conn.safe_session() as session:
+            df = session.sql(f"SELECT * FROM {PLAYOFF_RESULTS_TABLE}").to_pandas()
         if len(df) == 0:
             return {}
         row = df.iloc[0]
@@ -100,9 +105,10 @@ def _load_playoff_results() -> dict:
 
 def _load_user_playoff(email: str) -> dict:
     try:
-        df = session.sql(
-            f"SELECT * FROM {PLAYOFF_PRED_TABLE} WHERE USER_EMAIL = '{email}'"
-        ).to_pandas()
+        with conn.safe_session() as session:
+            df = session.sql(
+                f"SELECT * FROM {PLAYOFF_PRED_TABLE} WHERE USER_EMAIL = '{email}'"
+            ).to_pandas()
         if len(df) == 0:
             return {}
         row = df.iloc[0]
@@ -172,12 +178,13 @@ if not players:
     st.info("Ei veikkauksia vielä.")
     st.stop()
 
-scored_count = session.sql(
-    f"SELECT COUNT(*) AS N FROM {RESULTS_TABLE} WHERE HOME_TEAM_GOALS IS NOT NULL"
-).collect()[0]["N"]
-total_games = session.sql(
-    f"SELECT COUNT(*) AS N FROM {SCHEMA}.FIFA_VEIKKAUS_SCHEDULE"
-).collect()[0]["N"]
+with conn.safe_session() as session:
+    scored_count = session.sql(
+        f"SELECT COUNT(*) AS N FROM {RESULTS_TABLE} WHERE HOME_TEAM_GOALS IS NOT NULL"
+    ).collect()[0]["N"]
+    total_games = session.sql(
+        f"SELECT COUNT(*) AS N FROM {SCHEMA}.FIFA_VEIKKAUS_SCHEDULE"
+    ).collect()[0]["N"]
 st.caption(f"Otteluja tuloksilla: **{scored_count} / {total_games}**")
 
 # ── Pistetaulukko ─────────────────────────────────────────────────────────────

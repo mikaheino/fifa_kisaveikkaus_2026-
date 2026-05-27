@@ -17,7 +17,9 @@ if user_email not in ADMIN_EMAILS:
     st.error("Ei oikeuksia.")
     st.stop()
 
-session = st.session_state.snowpark_session
+# Shared connection — every query runs inside `conn.safe_session()` (thread-safe
+# lock) because all viewers share one container instance. See AGENTS.md.
+conn = st.session_state.snowpark_conn
 SCHEMA = "FIFA_VEIKKAUS"
 SCHEDULE_TABLE = f"{SCHEMA}.FIFA_VEIKKAUS_SCHEDULE"
 RESULTS_TABLE = f"{SCHEMA}.FIFA_VEIKKAUS_RESULTS"
@@ -61,15 +63,16 @@ def flagged(match: str) -> str:
 st.title("Syötä tulokset")
 
 # ── Load schedule + current results ──────────────────────────────────────────
-data_df = session.sql(
-    f"""
-    SELECT s.ID, s.MATCH_DAY, s.MATCH,
-           r.HOME_TEAM_GOALS, r.AWAY_TEAM_GOALS
-    FROM {SCHEDULE_TABLE} s
-    LEFT JOIN {RESULTS_TABLE} r ON s.ID = r.ID
-    ORDER BY s.ID
-    """
-).to_pandas()
+with conn.safe_session() as session:
+    data_df = session.sql(
+        f"""
+        SELECT s.ID, s.MATCH_DAY, s.MATCH,
+               r.HOME_TEAM_GOALS, r.AWAY_TEAM_GOALS
+        FROM {SCHEDULE_TABLE} s
+        LEFT JOIN {RESULTS_TABLE} r ON s.ID = r.ID
+        ORDER BY s.ID
+        """
+    ).to_pandas()
 
 total = len(data_df)
 filled = int(data_df["HOME_TEAM_GOALS"].notna().sum())
@@ -138,14 +141,15 @@ if submit:
         st.warning("Ei tallennettavia tuloksia – syötä pisteet numeroina 0–20.")
     else:
         try:
-            for gid, (home, away) in parsed.items():
-                session.sql(
-                    f"MERGE INTO {RESULTS_TABLE} t "
-                    f"USING (SELECT {gid} AS ID, {home} AS HOME_TEAM_GOALS, {away} AS AWAY_TEAM_GOALS) s "
-                    f"ON t.ID = s.ID "
-                    f"WHEN MATCHED THEN UPDATE SET t.HOME_TEAM_GOALS = s.HOME_TEAM_GOALS, t.AWAY_TEAM_GOALS = s.AWAY_TEAM_GOALS "
-                    f"WHEN NOT MATCHED THEN INSERT (ID, HOME_TEAM_GOALS, AWAY_TEAM_GOALS) VALUES (s.ID, s.HOME_TEAM_GOALS, s.AWAY_TEAM_GOALS)"
-                ).collect()
+            with conn.safe_session() as session:
+                for gid, (home, away) in parsed.items():
+                    session.sql(
+                        f"MERGE INTO {RESULTS_TABLE} t "
+                        f"USING (SELECT {gid} AS ID, {home} AS HOME_TEAM_GOALS, {away} AS AWAY_TEAM_GOALS) s "
+                        f"ON t.ID = s.ID "
+                        f"WHEN MATCHED THEN UPDATE SET t.HOME_TEAM_GOALS = s.HOME_TEAM_GOALS, t.AWAY_TEAM_GOALS = s.AWAY_TEAM_GOALS "
+                        f"WHEN NOT MATCHED THEN INSERT (ID, HOME_TEAM_GOALS, AWAY_TEAM_GOALS) VALUES (s.ID, s.HOME_TEAM_GOALS, s.AWAY_TEAM_GOALS)"
+                    ).collect()
             st.success(f"{len(parsed)} tulosta tallennettu.")
             st.rerun()
         except Exception as e:
@@ -162,7 +166,8 @@ st.caption(
 
 playoff_existing: dict = {}
 try:
-    pp_df = session.sql(f"SELECT * FROM {PLAYOFF_RESULTS_TABLE}").to_pandas()
+    with conn.safe_session() as session:
+        pp_df = session.sql(f"SELECT * FROM {PLAYOFF_RESULTS_TABLE}").to_pandas()
     if len(pp_df) > 0:
         for k in _RESULT_COLS:
             if k not in pp_df.columns:
@@ -304,10 +309,11 @@ if playoff_submit:
     val_list = ", ".join(values)
 
     try:
-        session.sql(f"DELETE FROM {PLAYOFF_RESULTS_TABLE}").collect()
-        session.sql(
-            f"INSERT INTO {PLAYOFF_RESULTS_TABLE} ({col_list}) VALUES ({val_list})"
-        ).collect()
+        with conn.safe_session() as session:
+            session.sql(f"DELETE FROM {PLAYOFF_RESULTS_TABLE}").collect()
+            session.sql(
+                f"INSERT INTO {PLAYOFF_RESULTS_TABLE} ({col_list}) VALUES ({val_list})"
+            ).collect()
         st.success("Pudotuspelien tulokset tallennettu.")
         st.rerun()
     except Exception as e:

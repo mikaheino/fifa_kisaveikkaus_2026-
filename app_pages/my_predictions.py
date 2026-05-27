@@ -21,8 +21,11 @@ from app_pages._celebrate import (
 apply_theme()
 consume_pending()
 
-# ── Session + tables ──────────────────────────────────────────────────────────
-session = st.session_state.snowpark_session
+# ── Connection + tables ─────────────────────────────────────────────────────
+# Shared across all viewers (one container instance), so every query runs inside
+# `conn.safe_session()` — the connection's thread-safe lock. Never hold a bare
+# Snowpark session across threads. See AGENTS.md "Session management".
+conn = st.session_state.snowpark_conn
 SCHEMA = "FIFA_VEIKKAUS"
 PREDICTIONS_TABLE = f"{SCHEMA}.FIFA_VEIKKAUS_PREDICTIONS"
 PLAYOFF_TABLE = f"{SCHEMA}.FIFA_VEIKKAUS_PLAYOFF_PREDICTIONS"
@@ -85,10 +88,15 @@ def email_to_display_name(email: str) -> str:
 
 
 # ── Auto-identify user ────────────────────────────────────────────────────────
-user_email = (
-    st.session_state.get("user_email")
-    or session.sql("SELECT CURRENT_USER()").collect()[0][0].lower()
-)
+# Identity comes ONLY from st.user.email (resolved per session in streamlit_app.py).
+# Never fall back to CURRENT_USER(): in the container runtime that returns the
+# shared service account, not the viewer (AGENTS.md "Viewer identity"), so a
+# fallback would silently mis-attribute one viewer's save to another identity.
+# Fail closed instead.
+user_email = st.session_state.get("user_email")
+if not user_email:
+    st.error("Käyttäjän tunnistus epäonnistui. Lataa sivu uudelleen.")
+    st.stop()
 display_name = email_to_display_name(user_email)
 
 st.subheader(f"Tervetuloa, {display_name}")
@@ -150,18 +158,21 @@ if is_locked:
 # across all viewers. The per-user predictions live in st.session_state and
 # are invalidated explicitly after a successful save.
 @st.cache_data(ttl=3600, show_spinner=False)
-def _load_schedule(_session) -> pd.DataFrame:
-    return _session.sql(
-        f"SELECT ID, MATCH_DAY, MATCH FROM {SCHEMA}.FIFA_VEIKKAUS_SCHEDULE ORDER BY ID"
-    ).to_pandas()
+def _load_schedule(_conn) -> pd.DataFrame:
+    with _conn.safe_session() as session:
+        return session.sql(
+            f"SELECT ID, MATCH_DAY, MATCH FROM {SCHEMA}.FIFA_VEIKKAUS_SCHEDULE ORDER BY ID"
+        ).to_pandas()
 
 
 def _load_existing_preds(user_email: str) -> dict[int, tuple]:
     out: dict[int, tuple] = {}
-    for _, row in session.sql(
-        f"SELECT ID, HOME_TEAM_GOALS, AWAY_TEAM_GOALS FROM {PREDICTIONS_TABLE} "
-        f"WHERE USER_EMAIL = '{user_email}' ORDER BY ID"
-    ).to_pandas().iterrows():
+    with conn.safe_session() as session:
+        rows = session.sql(
+            f"SELECT ID, HOME_TEAM_GOALS, AWAY_TEAM_GOALS FROM {PREDICTIONS_TABLE} "
+            f"WHERE USER_EMAIL = '{user_email}' ORDER BY ID"
+        ).to_pandas()
+    for _, row in rows.iterrows():
         h, a = row["HOME_TEAM_GOALS"], row["AWAY_TEAM_GOALS"]
         out[int(row["ID"])] = (
             None if pd.isna(h) else h,
@@ -173,9 +184,10 @@ def _load_existing_preds(user_email: str) -> dict[int, tuple]:
 def _load_playoff_existing(user_email: str) -> dict:
     out: dict = {}
     try:
-        pp_df = session.sql(
-            f"SELECT * FROM {PLAYOFF_TABLE} WHERE USER_EMAIL = '{user_email}'"
-        ).to_pandas()
+        with conn.safe_session() as session:
+            pp_df = session.sql(
+                f"SELECT * FROM {PLAYOFF_TABLE} WHERE USER_EMAIL = '{user_email}'"
+            ).to_pandas()
         if len(pp_df) > 0:
             for k in _PLAYOFF_COLS:
                 if k not in pp_df.columns:
@@ -188,7 +200,7 @@ def _load_playoff_existing(user_email: str) -> dict:
     return out
 
 
-schedule_df = _load_schedule(session)
+schedule_df = _load_schedule(conn)
 
 # Per-user caches keyed by email — flushed on user switch or after a save.
 if st.session_state.get("_preds_cache_user") != user_email:
@@ -612,9 +624,6 @@ if submit:
 
     final_df = pd.DataFrame(rows_out).sort_values("ID").reset_index(drop=True)
     try:
-        session.sql(
-            f"DELETE FROM {PREDICTIONS_TABLE} WHERE USER_EMAIL = '{user_email}'"
-        ).collect()
         values_parts = []
         for _, r in final_df.iterrows():
             h_sql = "NULL" if pd.isna(r["HOME_TEAM_GOALS"]) else str(int(r["HOME_TEAM_GOALS"]))
@@ -623,11 +632,17 @@ if submit:
                 f"('{r['USER_EMAIL']}', {int(r['ID'])}, '{r['MATCH_DAY']}', "
                 f"'{r['MATCH']}', {h_sql}, {a_sql}, '{now_str}')"
             )
-        session.sql(
-            f"INSERT INTO {PREDICTIONS_TABLE} "
-            f"(USER_EMAIL, ID, MATCH_DAY, MATCH, HOME_TEAM_GOALS, AWAY_TEAM_GOALS, INSERTED) "
-            f"VALUES {', '.join(values_parts)}"
-        ).collect()
+        # DELETE + INSERT in one safe_session block so no other viewer's query
+        # interleaves between them on the shared connection.
+        with conn.safe_session() as session:
+            session.sql(
+                f"DELETE FROM {PREDICTIONS_TABLE} WHERE USER_EMAIL = '{user_email}'"
+            ).collect()
+            session.sql(
+                f"INSERT INTO {PREDICTIONS_TABLE} "
+                f"(USER_EMAIL, ID, MATCH_DAY, MATCH, HOME_TEAM_GOALS, AWAY_TEAM_GOALS, INSERTED) "
+                f"VALUES {', '.join(values_parts)}"
+            ).collect()
         st.session_state.pop("_existing_preds", None)
         if skipped:
             st.warning(
@@ -844,12 +859,17 @@ def _render_playoff_section() -> None:
         val_list = ", ".join(values)
 
         try:
-            session.sql(
-                f"DELETE FROM {PLAYOFF_TABLE} WHERE USER_EMAIL = '{user_email}'"
-            ).collect()
-            session.sql(
-                f"INSERT INTO {PLAYOFF_TABLE} ({col_list}) VALUES ({val_list})"
-            ).collect()
+            # DELETE + INSERT in one safe_session block (atomic w.r.t. other
+            # viewers on the shared connection). _load_playoff_existing opens its
+            # own safe_session, so call it after this block — safe_session locks
+            # are not reentrant, and nesting would deadlock.
+            with conn.safe_session() as session:
+                session.sql(
+                    f"DELETE FROM {PLAYOFF_TABLE} WHERE USER_EMAIL = '{user_email}'"
+                ).collect()
+                session.sql(
+                    f"INSERT INTO {PLAYOFF_TABLE} ({col_list}) VALUES ({val_list})"
+                ).collect()
             # Refresh per-user cache and force a full-app rerun so the floating
             # counter (rendered at script top) reflects the new playoff total.
             st.session_state._playoff_existing = _load_playoff_existing(user_email)

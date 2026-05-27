@@ -5,6 +5,7 @@ by ``data/schedule_2026.json``); this module adds in-memory predictions and
 results storage on top so all UI features can be exercised locally.
 """
 import pandas as pd
+from contextlib import contextmanager
 from typing import Optional
 
 from schedule_data import GROUPS, TEAMS as ALL_TEAMS, SCHEDULE_MATCHES
@@ -168,7 +169,17 @@ class _MockResult:
 # ── Mock session ──────────────────────────────────────────────────────────────
 
 class MockSession:
-    """Mimics the subset of Snowpark Session API used by the app."""
+    """Mimics the subset of Snowpark Session API used by the app.
+
+    Doubles as a stand-in for ``st.connection("snowflake")``: ``safe_session()``
+    yields the mock itself, mirroring SnowflakeConnection's thread-safe context
+    manager so page code can use the same ``with conn.safe_session()`` pattern
+    locally and in production.
+    """
+
+    @contextmanager
+    def safe_session(self):
+        yield self
 
     def sql(self, query: str) -> _MockResult:
         global _PREDICTIONS_DF, _PLAYOFF_DF, _PLAYOFF_RESULTS_DF

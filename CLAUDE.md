@@ -12,7 +12,9 @@ This repo is the **container runtime** template. For new SiS projects, start fro
 ## Essential rules for Claude Code
 
 - **Runtime**: Snowflake SiS **container runtime** on `FIFA_VEIKKAUS_POOL` (XS, auto-suspended by `FIFA_VEIKKAUS_AUTOSTOP_TASK`), Python 3.11. Anaconda channel preferred; pip allowed.
-- **Session**: always `session = st.session_state.snowpark_session`
+- **Session**: the shared connection lives at `st.session_state.snowpark_conn`. Run **every** query inside `with conn.safe_session() as session:` — the container instance is shared across all viewers and a bare Snowpark session is not thread-safe (concurrent queries leak result rows between viewers). Never nest `safe_session()` blocks (the lock is not reentrant).
+- **Identity**: resolve the viewer only from `st.user.email` (set in `streamlit_app.py`). **Never** fall back to `CURRENT_USER()` — in the container runtime it returns the service account, not the viewer. Fail closed if the email is missing.
+- **New pages**: any page added under `app_pages/` MUST follow both patterns above — `conn = st.session_state.snowpark_conn` with every query in a `conn.safe_session()` block, and identity from `st.user.email` only. Mirror an existing page (`my_predictions.py`, `standings.py`, `admin_results.py`).
 - **Images**: live in `assets/`; loaded via base64 CSS injection (Snowflake CSP blocks external URLs)
 - **NaN vs None**: Snowpark returns NaN for NULL numerics — always use `pd.isna()`, never `is None`
 - **No experimental APIs**: use `st.rerun()` not `st.experimental_rerun()`, etc.

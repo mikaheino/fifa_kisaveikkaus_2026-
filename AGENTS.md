@@ -9,7 +9,7 @@ Runs as a **Streamlit in Snowflake (SiS) app on the container runtime** (Snowfla
 # Directory Structure
 
 ```
-streamlit_app.py               # Production entry point — uses st.connection("snowflake").session()
+streamlit_app.py               # Production entry point — stores st.connection("snowflake"); pages query via conn.safe_session()
 streamlit_app_local.py         # Local dev entry point — instantiates MockSession instead of Snowpark
 mock_session.py                # MockSession class: fakes the Snowpark session.sql(...).collect()/.to_pandas()
                                #   surface, seeds the 72-game schedule + demo predictions + Saksa-wins playoff
@@ -139,10 +139,28 @@ ALTER STREAMLIT my_app ADD LIVE VERSION FROM LAST;
 
 ### Session management
 
+All viewers share **one** container instance, so the connection's underlying
+Snowpark session is shared across every viewer's script-runner thread. **Snowpark
+sessions are not thread-safe** — concurrent queries on a shared session race on the
+single underlying connection and can return one viewer's result rows to another
+viewer's thread (a real cross-user data leak). Always go through the connection's
+thread-safe `safe_session()` context manager; never hold the raw `.session()`.
+
 ```python
-# Container runtime (correct)
-session = st.connection("snowflake").session()
+# Container runtime (correct) — store the CONNECTION, query via safe_session()
+st.session_state.snowpark_conn = st.connection("snowflake")
 user_email = st.user.email.lower()
+
+conn = st.session_state.snowpark_conn
+with conn.safe_session() as session:           # built-in thread-safe lock
+    df = session.sql("SELECT ...").to_pandas()
+
+# Keep a DELETE+INSERT (or any multi-statement unit) inside ONE safe_session
+# block so no other viewer's query interleaves. safe_session() locks are NOT
+# reentrant — never nest one inside another (it deadlocks).
+
+# WRONG — bare session shared across threads, no lock
+# session = st.connection("snowflake").session()   # races under concurrency
 
 # Warehouse runtime (legacy — DO NOT USE in container runtime)
 # from snowflake.snowpark.context import get_active_session
@@ -205,7 +223,7 @@ Changes are visible to viewers on their next interaction — no restart needed.
 |---|---|---|
 | `CREATE STREAMLIT` | `ROOT_LOCATION` or `FROM` | `FROM` only (+ `ADD LIVE VERSION`) |
 | Dependencies | `environment.yml` (conda) | `pyproject.toml` / `requirements.txt` (pip/uv) |
-| Session | `get_active_session()` | `st.connection("snowflake").session()` |
+| Session | `get_active_session()` | `st.connection("snowflake")` + `conn.safe_session()` |
 | Viewer identity | `CURRENT_USER()` = viewer | `st.user.email` / `st.user.user_name` |
 | `CURRENT_USER()` | Viewer's username | Internal service account |
 | Execution model | One instance per viewer | One shared instance, all viewers |
@@ -220,8 +238,9 @@ Changes are visible to viewers on their next interaction — no restart needed.
 1. Create compute pool (`CPU_X64_XS`, `AUTO_RESUME=TRUE`, `INITIALLY_SUSPENDED=TRUE`)
 2. Create network rule + EAI for PyPI
 3. Create `pyproject.toml` with `streamlit[snowflake]==<version>` + other deps
-4. Use `st.connection("snowflake").session()` for Snowpark
+4. Use `st.connection("snowflake")` + `conn.safe_session()` (thread-safe) for Snowpark
 5. Use `st.user.email` / `st.user.user_name` for viewer identity
+   > **Every new page** must follow both: `conn = st.session_state.snowpark_conn` with all queries inside `conn.safe_session()`, and identity from `st.user.email` only (fail closed, never `CURRENT_USER()`). Mirror an existing `app_pages/*.py`.
 6. Use `FROM` syntax in `CREATE STREAMLIT` + `ADD LIVE VERSION FROM LAST`
 7. Attach EAI: `EXTERNAL_ACCESS_INTEGRATIONS = (my_eai)`
 8. Grant `USAGE` on compute pool + Streamlit object to viewer roles
@@ -249,8 +268,9 @@ Changes are visible to viewers on their next interaction — no restart needed.
 - **Never bypass Snowflake RBAC.** All database actions must go through the assigned role (`FIFA_VEIKKAUS_PLAYER_ROLE` or `FIFA_VEIKKAUS_ADMIN_ROLE`). Never use `ACCOUNTADMIN` for app queries.
 - **Never commit credentials or `.env` files.** The Snowflake connection is handled by `st.connection("snowflake")` in production and `MockSession` locally — no hardcoded connection strings.
 - **Never run destructive SQL (`DROP`, `TRUNCATE`, `DELETE`) in production** without explicit user instruction and confirmation.
-- **Never use `get_active_session()`** — it is not thread-safe and returns the service account in container runtime. Always use `st.connection("snowflake").session()`.
-- **Never use `CURRENT_USER()` to identify the viewer** — it returns the internal service account (e.g. `Stplatstreamlit15690228`) in container runtime. Use `st.user.email` or `st.user.user_name` instead.
+- **Never use `get_active_session()`** — it is not thread-safe and returns the service account in container runtime. Use `st.connection("snowflake")` and run every query inside `conn.safe_session()`.
+- **Never hold the raw `.session()` across threads.** The container instance is shared by all viewers; a bare Snowpark session used concurrently leaks result rows between viewers. Wrap each query in `with conn.safe_session() as session:` (and never nest those blocks — the lock is not reentrant).
+- **Never use `CURRENT_USER()` to identify the viewer** — it returns the internal service account (e.g. `Stplatstreamlit15690228`) in container runtime. Use `st.user.email` or `st.user.user_name` instead, and **fail closed** (`st.error` + `st.stop()`) if it is missing rather than falling back to `CURRENT_USER()`, which would silently mis-attribute one viewer's save to another identity.
 - **Never use `ROOT_LOCATION` in `CREATE STREAMLIT`** — it only supports warehouse runtime. Always use `FROM` + `ADD LIVE VERSION FROM LAST`.
 - **Never use `environment.yml` for container runtime** — it is ignored. Use `pyproject.toml` or `requirements.txt`.
 - **Never use `st.experimental_*` APIs** — they are removed in current Streamlit versions and will break on deployment.
@@ -520,7 +540,7 @@ There is no CI/CD pipeline. Deploys are manual SQL PUT commands (see Snowflake-S
 
 # Local Development
 
-The local entry point `streamlit_app_local.py` swaps `st.connection("snowflake").session()` for `MockSession`, so the full UI runs without a Snowflake connection.
+The local entry point `streamlit_app_local.py` swaps `st.connection("snowflake")` for `MockSession`, so the full UI runs without a Snowflake connection. `MockSession.safe_session()` yields the mock itself, so the same `with conn.safe_session() as session:` pattern works locally and in production.
 
 ```bash
 # Start the local server (default port 8501)
