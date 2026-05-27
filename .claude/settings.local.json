@@ -139,7 +139,8 @@
       "Bash(pkill -f \"streamlit run streamlit_app_local.py\")",
       "Bash(git checkout *)",
       "Bash(git merge *)",
-      "Bash(git branch *)"
+      "Bash(git branch *)",
+      "Bash(echo \"=== exit: $? ===\")"
     ]
   }
 }
