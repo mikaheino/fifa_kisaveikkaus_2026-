@@ -135,7 +135,11 @@
       "Bash(pkill -f \"streamlit run\")",
       "Bash(\"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome\" --headless --disable-gpu --hide-scrollbars --window-size=720,1400 --screenshot=/tmp/fifa_shots/fit4.png file:///tmp/fifa_shots/fit4.html)",
       "Bash(/Users/mika.heino/prod/fifa_kisaveikkaus_2026/.venv_local/bin/python /tmp/fifa_shots/cmp_live.py)",
-      "Bash(grep -iv \"components.v1\\\\|will be removed\\\\|^$\")"
+      "Bash(grep -iv \"components.v1\\\\|will be removed\\\\|^$\")",
+      "Bash(pkill -f \"streamlit run streamlit_app_local.py\")",
+      "Bash(git checkout *)",
+      "Bash(git merge *)",
+      "Bash(git branch *)"
     ]
   }
 }
