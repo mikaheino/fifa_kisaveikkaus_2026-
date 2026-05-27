@@ -58,10 +58,14 @@ def get_players() -> list[str]:
 def compute_player_points(player_email: str) -> pd.DataFrame:
     """5/3/1 scoring: 5 exact, 3 same goal-difference (incl. matching draws),
     1 correct winner/draw outcome only, 0 wrong."""
+    # Drive from PREDICTIONS (LEFT JOIN RESULTS) so a player's picks render even
+    # before any results are entered — RESULTS is empty until admin fills it, and
+    # it has no MATCH column, so MATCH/MATCH_DAY come from the predictions row.
+    # POINTS stays NULL until the matching result exists.
     sql = f"""
     SELECT
-        r.ID,
-        r.MATCH,
+        p.ID,
+        p.MATCH,
         p.MATCH_DAY,
         r.HOME_TEAM_GOALS AS RESULT_HOME,
         r.AWAY_TEAM_GOALS AS RESULT_AWAY,
@@ -82,10 +86,9 @@ def compute_player_points(player_email: str) -> pd.DataFrame:
             ELSE 0
         END AS POINTS
     FROM {PREDICTIONS_TABLE} p
-    INNER JOIN {RESULTS_TABLE} r ON p.ID = r.ID
+    LEFT JOIN {RESULTS_TABLE} r ON p.ID = r.ID
     WHERE p.USER_EMAIL = '{player_email}'
-      AND r.MATCH IS NOT NULL
-    ORDER BY r.ID
+    ORDER BY p.ID
     """
     with conn.safe_session() as session:
         return session.sql(sql).to_pandas()
