@@ -166,10 +166,15 @@ export default function (component) {
     } catch (_) {}
   }
 
-  // First-mount: build chips. Subsequent reruns: reuse them.
-  const firstRender = !parentElement._tg_initialized;
-  if (firstRender) {
-    parentElement._tg_initialized = true;
+  // Build chips on first mount, and rebuild whenever the team pool itself
+  // changes (e.g. the parent pruned options after a runner-up was picked).
+  // Reusing stale chips would leave a team that is no longer a valid option
+  // clickable in the grid — the source of the "UI behaves strangely" bug.
+  const teamsSig = teams.join("|");
+  const needsBuild = parentElement._tg_sig !== teamsSig;
+  if (needsBuild) {
+    parentElement._tg_sig = teamsSig;
+    grid.innerHTML = "";
     teams.forEach((team) => {
       const chip = document.createElement("button");
       chip.type = "button";

@@ -705,18 +705,39 @@ def _render_playoff_section() -> None:
     st.markdown("**Parhaat kolmoset – valitse 8 joukkuetta**")
     st.caption("8 lohkokolmosta etenee R32-vaiheeseen (1 p / kpl).")
 
-    _picked_w_r = {
-        t for (w, r) in group_picks.values() for t in (w, r) if t and t != "—"
-    }
-    _third_options = [t for t in TEAMS if t not in _picked_w_r]
+    # The third-place pool is every team that is neither a group winner nor a
+    # runner-up. While groups are still being filled, that pool is ambiguous —
+    # a team shown here might still become a runner-up. So the picker stays
+    # closed until *all* winners and runners-up are chosen; only then is the
+    # remaining set of candidates final and stable.
+    _n_groups = len(_GROUP_LETTERS)
+    _n_winners_done = sum(1 for (w, _) in group_picks.values() if w and w != "—")
+    _n_runners_done = sum(1 for (_, r) in group_picks.values() if r and r != "—")
+    _groups_complete = _n_winners_done == _n_groups and _n_runners_done == _n_groups
 
-    third_teams = team_grid_picker(
-        teams=_third_options,
-        selected=_ms_defaults("THIRD", 8),
-        team_labels={t: with_flag(t) for t in _third_options},
-        max_selected=8,
-        key="grid_third",
-    )
+    if _groups_complete:
+        _picked_w_r = {
+            t for (w, r) in group_picks.values() for t in (w, r) if t and t != "—"
+        }
+        _third_options = [t for t in TEAMS if t not in _picked_w_r]
+
+        third_teams = team_grid_picker(
+            teams=_third_options,
+            selected=_ms_defaults("THIRD", 8),
+            team_labels={t: with_flag(t) for t in _third_options},
+            max_selected=8,
+            key="grid_third",
+        )
+    else:
+        st.info(
+            "Valitse ensin kaikkien lohkojen voittajat ja kakkoset — "
+            f"lohkokolmosten valinta aukeaa sen jälkeen "
+            f"(voittajat **{_n_winners_done}/{_n_groups}**, "
+            f"kakkoset **{_n_runners_done}/{_n_groups}**)."
+        )
+        # Keep any previously saved thirds so a re-save doesn't wipe them, but
+        # don't render a picker whose options would be inconsistent.
+        third_teams = _ms_defaults("THIRD", 8)
 
     # ── R32 → Champion: visual bracket ──────────────────────────────────────
     st.markdown("**Bracket: R16 → Mestari**")
